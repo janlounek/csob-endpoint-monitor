@@ -11,11 +11,13 @@ function getFailReason(failure) {
 async function sendNotification(failures) {
   const webhookUrl = getSetting('slack_webhook_url');
   if (!webhookUrl) {
-    console.log('No Slack webhook configured, skipping notification.');
+    console.log('  Slack: No webhook configured, skipping notification.');
     return;
   }
 
-  // Send exactly 1 message per scan
+  console.log(`  Slack: Sending notification for ${failures.length} failure(s)...`);
+
+  // Build exactly 1 message
   const blocks = [];
 
   if (failures.length === 1) {
@@ -36,7 +38,7 @@ async function sendNotification(failures) {
       }
     );
   } else {
-    // Multiple failures — summary message
+    // Multiple failures — compact summary
     const bySite = {};
     for (const f of failures) {
       if (!bySite[f.siteName]) bySite[f.siteName] = { url: f.siteUrl, checks: [] };
@@ -59,7 +61,9 @@ async function sendNotification(failures) {
       { type: 'divider' }
     );
 
-    for (const [siteName, data] of Object.entries(bySite)) {
+    // Compact: max 10 sites in the message to stay under Slack block limits
+    const siteEntries = Object.entries(bySite).slice(0, 10);
+    for (const [siteName, data] of siteEntries) {
       const checkList = data.checks
         .map(function(c) {
           const icon = c.status === 'fail' ? ':x:' : ':exclamation:';
@@ -75,6 +79,13 @@ async function sendNotification(failures) {
         },
       });
     }
+
+    if (Object.keys(bySite).length > 10) {
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `_...and ${Object.keys(bySite).length - 10} more site(s)_` },
+      });
+    }
   }
 
   blocks.push(
@@ -88,17 +99,23 @@ async function sendNotification(failures) {
   );
 
   try {
+    const body = JSON.stringify({ blocks });
+    console.log(`  Slack: Sending ${blocks.length} blocks (${body.length} bytes)...`);
+
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blocks }),
+      body: body,
     });
 
+    const responseText = await response.text();
     if (!response.ok) {
-      console.error(`Slack webhook failed: ${response.status} ${response.statusText}`);
+      console.error(`  Slack webhook failed: ${response.status} ${responseText}`);
+    } else {
+      console.log(`  Slack: Notification sent successfully (${responseText})`);
     }
   } catch (e) {
-    console.error('Slack notification error:', e.message);
+    console.error('  Slack notification error:', e.message);
   }
 }
 

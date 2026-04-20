@@ -160,8 +160,12 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
   var hasCustom = findings.customDomainRequests > 0;
   var analyticsPresent = hasLegacy || hasEdge || hasCustom;
 
-  // If rsid validation is configured, it must match
-  var rsidOk = !expectedRsid || findings.rsidMatch === true;
+  // RSID validation: only fail if we found a DIFFERENT rsid than expected.
+  // If rsid couldn't be extracted (common with Edge Network), don't fail.
+  var rsidOk = true;
+  if (expectedRsid && findings.rsidFound && findings.rsidMatch === false) {
+    rsidOk = false; // Found a different RSID — that's a real mismatch
+  }
 
   var pass = analyticsPresent && rsidOk;
 
@@ -176,12 +180,13 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
     if (findings.edgeRequests > 0) parts.push(findings.edgeRequests + ' Edge Network request(s)');
     if (findings.customDomainRequests > 0) parts.push(findings.customDomainRequests + ' request(s) to ' + trackingDomain);
     if (findings.rsidFound) parts.push('RSID: ' + findings.rsidFound);
+    if (expectedRsid && !findings.rsidFound) parts.push('RSID not extractable from requests (Edge Network)');
 
-    if (expectedRsid && findings.rsidMatch === false) {
+    if (!rsidOk) {
       findings.reasons = [
         'FAIL: Analytics is present but reporting suite mismatch',
         'Expected RSID: ' + expectedRsid,
-        'Found RSID: ' + (findings.rsidFound || 'none detected'),
+        'Found RSID: ' + findings.rsidFound,
         'OK (analytics): ' + parts.join(', '),
       ];
     } else {

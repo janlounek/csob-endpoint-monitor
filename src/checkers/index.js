@@ -112,8 +112,13 @@ async function runAllChecks() {
 
     // Send max 1 Slack message per scan cycle
     if (failures.length > 0) {
-      console.log(`  ${failures.length} failure(s) detected, sending Slack notification...`);
+      console.log(`  ${failures.length} failure(s) detected across all sites:`);
+      for (const f of failures) {
+        console.log(`    - ${f.siteName}: ${f.checkLabel} (${f.status})`);
+      }
       await sendNotification(failures);
+    } else {
+      console.log('  All checks passed, no Slack notification needed.');
     }
 
     console.log(`[${new Date().toISOString()}] Check cycle complete. ${sites.length} sites checked.`);
@@ -141,6 +146,24 @@ async function runSingleSiteCheck(siteId) {
     console.log(`  Checking ${site.name} (${site.url})...`);
     await launchBrowser();
     const results = await runChecksForSite(site);
+
+    // Send Slack notification for failures
+    const failures = results
+      .filter(r => r.status === 'fail' || r.status === 'error')
+      .map(r => ({
+        siteName: site.name,
+        siteUrl: site.url,
+        checkType: r.checkType,
+        checkLabel: CHECKER_LABELS[r.checkType] || r.checkType,
+        status: r.status,
+        details: r.details,
+      }));
+
+    if (failures.length > 0) {
+      console.log(`  ${failures.length} failure(s) for ${site.name}, sending Slack notification...`);
+      await sendNotification(failures);
+    }
+
     return results;
   } finally {
     await closeBrowser();
