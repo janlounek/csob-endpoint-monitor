@@ -76,12 +76,42 @@ function enableRunBtn() {
   if (btn) { btn.disabled = false; btn.textContent = 'Run All Checks'; }
 }
 
-// --- Dashboard (clean — no logs, just status dots) ---
+// --- Dashboard (grouped, clean) ---
+
+function renderSiteChecks(site) {
+  return (site.checks || []).map(function(c) {
+    var result = site.latestResults[c.checker_type];
+    var st = result ? result.status : 'unknown';
+    var label = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[c.checker_type]) || c.checker_type;
+    return '<span class="check-badge ' + st + '" title="' + label + ': ' + st.toUpperCase() + '"><span class="status-dot ' + st + '"></span>' + label + '</span>';
+  }).join('');
+}
+
+function getLastChecked(site) {
+  var times = Object.values(site.latestResults || {}).map(function(r) { return r.checked_at; });
+  return times.sort().pop();
+}
+
+function renderSiteRow(site, isChild) {
+  var checks = renderSiteChecks(site);
+  var lastChecked = getLastChecked(site);
+  var nameClass = isChild ? 'site-name-child' : 'site-name';
+  var prefix = isChild ? '<span class="child-indicator"></span>' : '';
+  var typeLabel = site.site_type === 'private' ? '<span class="type-badge private">Private</span>' : '';
+
+  return '<tr class="' + (isChild ? 'child-row' : 'parent-row') + '">' +
+    '<td class="' + nameClass + '">' + prefix + '<a href="/sites/' + site.id + '">' + escapeHtml(site.name) + '</a> ' + typeLabel + '</td>' +
+    '<td><a href="' + escapeHtml(site.url) + '" target="_blank" class="site-url">' + escapeHtml(site.url) + '</a></td>' +
+    '<td><div class="check-badges">' + (checks || '<span class="text-muted">No checks</span>') + '</div></td>' +
+    '<td>' + timeAgo(lastChecked) + '</td>' +
+    '<td><a href="/sites/' + site.id + '" class="btn btn-sm btn-secondary">Logs</a></td>' +
+    '</tr>';
+}
 
 async function loadDashboard() {
   try {
-    var data = await Promise.all([api('/sites'), api('/status')]);
-    var sites = data[0];
+    var data = await Promise.all([api('/sites?grouped=1'), api('/status')]);
+    var groups = data[0];
     var status = data[1];
 
     document.getElementById('total-sites').textContent = status.totalSites;
@@ -89,33 +119,22 @@ async function loadDashboard() {
     document.getElementById('failing-sites').textContent = status.failing;
 
     var tbody = document.getElementById('sites-tbody');
-    if (sites.length === 0) {
+    if (groups.length === 0) {
       tbody.innerHTML = '<tr><td colspan="5" class="loading">No sites configured. <a href="/sites/new">Add one</a></td></tr>';
       return;
     }
 
-    tbody.innerHTML = sites.map(function(site) {
-      var checks = (site.checks || []).map(function(c) {
-        var result = site.latestResults[c.checker_type];
-        var st = result ? result.status : 'unknown';
-        var label = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[c.checker_type]) || c.checker_type;
-        return '<span class="check-badge ' + st + '" title="' + label + ': ' + st.toUpperCase() + '"><span class="status-dot ' + st + '"></span>' + label + '</span>';
-      }).join('');
+    var html = '';
+    for (var i = 0; i < groups.length; i++) {
+      var group = groups[i];
+      html += renderSiteRow(group, false);
+      var children = group.children || [];
+      for (var j = 0; j < children.length; j++) {
+        html += renderSiteRow(children[j], true);
+      }
+    }
+    tbody.innerHTML = html;
 
-      var lastChecked = Object.values(site.latestResults || {}).map(function(r) { return r.checked_at; }).sort().pop();
-
-      return '<tr>' +
-        '<td><a href="/sites/' + site.id + '">' + escapeHtml(site.name) + '</a></td>' +
-        '<td><a href="' + escapeHtml(site.url) + '" target="_blank" class="site-url">' + escapeHtml(site.url) + '</a></td>' +
-        '<td><div class="check-badges">' + (checks || '<span class="text-muted">No checks</span>') + '</div></td>' +
-        '<td>' + timeAgo(lastChecked) + '</td>' +
-        '<td>' +
-          '<a href="/sites/' + site.id + '" class="btn btn-sm btn-secondary">Logs</a>' +
-        '</td>' +
-        '</tr>';
-    }).join('');
-
-    // If a scan is currently running, show spinner and poll
     if (status.isRunning) {
       var btn = document.getElementById('run-all-btn');
       btn.disabled = true;
@@ -173,7 +192,6 @@ async function loadSiteDetail(siteId) {
     var site = data[0];
     var results = data[1];
 
-    // Render status cards with reasons
     var cardsEl = document.getElementById('status-cards');
     if (site.latestResults && site.latestResults.length > 0) {
       cardsEl.innerHTML = site.latestResults.map(function(r) {
@@ -191,7 +209,6 @@ async function loadSiteDetail(siteId) {
       cardsEl.innerHTML = '<p class="loading">No checks have run yet. Click "Check Now" to start.</p>';
     }
 
-    // Render results history table
     renderResults(results);
     resultsOffset = results.length;
   } catch (e) {

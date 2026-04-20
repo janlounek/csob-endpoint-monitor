@@ -8,20 +8,28 @@ const scheduler = require('../scheduler');
 // --- Sites ---
 
 router.get('/sites', (req, res) => {
-  const sites = db.getAllSites();
   const latestResults = db.getLatestResultsForAllSites();
 
-  // Attach latest results to each site
-  const sitesWithStatus = sites.map(site => {
+  function attachResults(site) {
     const results = latestResults.filter(r => r.site_id === site.id);
     const statusMap = {};
     for (const r of results) {
       statusMap[r.check_type] = { status: r.status, details: r.details, checked_at: r.checked_at };
     }
     return { ...site, latestResults: statusMap };
-  });
+  }
 
-  res.json(sitesWithStatus);
+  if (req.query.grouped === '1') {
+    const groups = db.getGroupedSites();
+    const grouped = groups.map(g => ({
+      ...attachResults(g),
+      children: (g.children || []).map(c => attachResults(c)),
+    }));
+    return res.json(grouped);
+  }
+
+  const sites = db.getAllSites();
+  res.json(sites.map(attachResults));
 });
 
 router.post('/sites', (req, res) => {

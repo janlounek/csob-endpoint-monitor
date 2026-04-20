@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS sites (
   name TEXT NOT NULL,
   url TEXT NOT NULL,
   enabled INTEGER DEFAULT 1,
+  parent_id INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+  site_type TEXT DEFAULT 'public',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
