@@ -38,7 +38,7 @@
 <script>
   var SITE_ID = <%= site.id %>;
   var CHECKER_LABELS = <%- JSON.stringify(checkerLabels) %>;
-  loadSiteDetail(SITE_ID);
+  document.addEventListener('DOMContentLoaded', function() { loadSiteDetail(SITE_ID); });
 </script>
 
 <%- include('footer') %>

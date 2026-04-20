@@ -39,7 +39,7 @@
 
 <script>
   var CHECKER_LABELS = <%- JSON.stringify(checkerLabels) %>;
-  loadDashboard();
+  document.addEventListener('DOMContentLoaded', function() { loadDashboard(); });
 </script>
 
 <%- include('footer') %>
