@@ -98,24 +98,21 @@ async function runAllChecks() {
 
       for (const result of results) {
         if (result.status === 'fail' || result.status === 'error') {
-          // Only alert on status transitions (pass -> fail/error)
-          const previousStatus = getPreviousStatus(site.id, result.checkType);
-          if (previousStatus === 'pass' || previousStatus === null) {
-            failures.push({
-              siteName: site.name,
-              siteUrl: site.url,
-              checkType: result.checkType,
-              checkLabel: CHECKER_LABELS[result.checkType] || result.checkType,
-              status: result.status,
-              details: result.details,
-            });
-          }
+          failures.push({
+            siteName: site.name,
+            siteUrl: site.url,
+            checkType: result.checkType,
+            checkLabel: CHECKER_LABELS[result.checkType] || result.checkType,
+            status: result.status,
+            details: result.details,
+          });
         }
       }
     }
 
+    // Send max 1 Slack message per scan cycle
     if (failures.length > 0) {
-      console.log(`  ${failures.length} new failure(s) detected, sending Slack notification...`);
+      console.log(`  ${failures.length} failure(s) detected, sending Slack notification...`);
       await sendNotification(failures);
     }
 

@@ -6,7 +6,7 @@ const { initDb, createSite, getAllSites, updateSite, getDb } = require('./db/dat
 
 initDb();
 
-// All check types to enable on each site
+// All check types for public sites
 const defaultChecks = [
   { type: 'meta_pixel', config: {} },
   { type: 'google_ads', config: {} },
@@ -15,6 +15,14 @@ const defaultChecks = [
   { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
   { type: 'onetrust', config: {} },
   { type: 'sklik', config: {} },
+  { type: 'exponea', config: { apiDomain: 'data-api.csob.cz' } },
+];
+
+// Private zones: no marketing endpoints (no Sklik, Google Ads, Adform, Facebook)
+const privateChecks = [
+  { type: 'adobe_analytics', config: { trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' } },
+  { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
+  { type: 'onetrust', config: {} },
   { type: 'exponea', config: { apiDomain: 'data-api.csob.cz' } },
 ];
 
@@ -29,6 +37,8 @@ const publicSites = [
   { name: 'CSOB Private Banking', url: 'https://www.csobpb.cz/' },
   { name: 'Platba Kartou CSOB', url: 'https://platbakartou.csob.cz/' },
   { name: 'CSOB Pojistovna', url: 'https://www.csobpoj.cz/' },
+  { name: 'CSOB Asset Management', url: 'https://www.csobam.cz/' },
+  { name: 'Pruvodce Podnikanim', url: 'https://www.pruvodcepodnikanim.cz/' },
 ];
 
 // Private zones mapped to their parent's name
@@ -74,20 +84,21 @@ if (existing.length > 0) {
     { name: 'CSOB CEB', url: 'https://ceb.csob.cz/web/public/odhlaseni', site_type: 'private' },
     { name: 'CSOB Pojistovna', url: 'https://www.csobpoj.cz/', site_type: 'public' },
     { name: 'Moje CSOB Pojistovna', url: 'https://moje.csobpoj.cz/', site_type: 'private' },
+    { name: 'CSOB Asset Management', url: 'https://www.csobam.cz/', site_type: 'public' },
+    { name: 'Pruvodce Podnikanim', url: 'https://www.pruvodcepodnikanim.cz/', site_type: 'public' },
   ];
-  const newZones = newSites;
 
-  for (const zone of newZones) {
-    if (!siteMap[zone.name]) {
-      const id = createSite({ name: zone.name, url: zone.url, checks: defaultChecks, site_type: zone.site_type || 'public' });
-      console.log(`  Created: ${zone.name} (ID: ${id})`);
+  for (const s of newSites) {
+    if (!siteMap[s.name]) {
+      const checks = s.site_type === 'private' ? privateChecks : defaultChecks;
+      const id = createSite({ name: s.name, url: s.url, checks: checks, site_type: s.site_type });
+      console.log(`  Created: ${s.name} (ID: ${id})`);
     } else {
-      console.log(`  Already exists: ${zone.name}`);
+      console.log(`  Already exists: ${s.name}`);
     }
   }
 
   // Update Adobe Analytics config to include reporting suite on all sites
-  const allSites = getAllSites();
   const d = getDb();
   const updated = d.prepare(`
     UPDATE site_checks SET config = ? WHERE checker_type = 'adobe_analytics' AND
@@ -95,6 +106,18 @@ if (existing.length > 0) {
   `).run(JSON.stringify({ trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' }));
   if (updated.changes > 0) {
     console.log(`  Updated ${updated.changes} Adobe Analytics check(s) with reporting suite: kbcnvcsobczprod`);
+  }
+
+  // Remove marketing checks (Sklik, Google Ads, Adform, Facebook) from private zones
+  const marketingChecks = ['sklik', 'google_ads', 'adform', 'meta_pixel'];
+  const privateSiteIds = getAllSites().filter(s => s.site_type === 'private').map(s => s.id);
+  if (privateSiteIds.length > 0) {
+    for (const checkType of marketingChecks) {
+      const del = d.prepare(
+        `DELETE FROM site_checks WHERE checker_type = ? AND site_id IN (${privateSiteIds.join(',')})`
+      ).run(checkType);
+      if (del.changes > 0) console.log(`  Removed ${checkType} from ${del.changes} private zone(s)`);
+    }
   }
 
   console.log('Migration complete.');
@@ -115,7 +138,7 @@ for (const site of publicSites) {
 // Create private zones linked to parents
 for (const zone of privateZones) {
   const parentId = parentIds[zone.parent];
-  const id = createSite({ name: zone.name, url: zone.url, checks: defaultChecks, parent_id: parentId, site_type: 'private' });
+  const id = createSite({ name: zone.name, url: zone.url, checks: privateChecks, parent_id: parentId, site_type: 'private' });
   console.log(`  Created: ${zone.name} (ID: ${id}) -> ${zone.parent} (ID: ${parentId})`);
 }
 
