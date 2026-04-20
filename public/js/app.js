@@ -79,7 +79,9 @@ function enableRunBtn() {
 // --- Dashboard (grouped by domain, clean) ---
 
 function renderSiteChecks(site) {
-  return (site.checks || []).map(function(c) {
+  return (site.checks || []).filter(function(c) {
+    return c.enabled === 1 || c.enabled === true;
+  }).map(function(c) {
     var result = site.latestResults[c.checker_type];
     var st = result ? result.status : 'unknown';
     var label = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[c.checker_type]) || c.checker_type;

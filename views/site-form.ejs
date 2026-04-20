@@ -59,6 +59,7 @@
                 <small class="help-text">Checks: s2.adform.net, track.adform.net</small>
               <% } else if (type === 'adobe_analytics') { %>
                 <input type="text" name="config_<%= type %>_trackingDomain" placeholder="Tracking domain (default: tracking-secure.csob.cz)" value="<%= getConfigVal(type, 'trackingDomain') %>">
+                <input type="text" name="config_<%= type %>_reportingSuite" placeholder="Reporting Suite ID (e.g. kbcnvcsobczprod)" value="<%= getConfigVal(type, 'reportingSuite') %>">
               <% } else if (type === 'adobe_launch') { %>
                 <input type="text" name="config_<%= type %>_customDomain" placeholder="Custom domain (default: statistics.csob.cz)" value="<%= getConfigVal(type, 'customDomain') %>">
               <% } else if (type === 'onetrust') { %>

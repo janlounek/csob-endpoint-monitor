@@ -203,15 +203,27 @@ router.get('/status', (req, res) => {
   const sites = db.getAllSites();
   const latestResults = db.getLatestResultsForAllSites();
 
+  // Build a set of enabled check types per site
+  const enabledChecks = {};
+  for (const site of sites) {
+    enabledChecks[site.id] = new Set(
+      (site.checks || []).filter(c => c.enabled).map(c => c.checker_type)
+    );
+  }
+
   const passing = new Set();
   const failing = new Set();
 
   for (const r of latestResults) {
+    // Only count results for checks that are currently enabled on the site
+    const siteChecks = enabledChecks[r.site_id];
+    if (!siteChecks || !siteChecks.has(r.check_type)) continue;
+
     if (r.status === 'pass') passing.add(r.site_id);
     else failing.add(r.site_id);
   }
 
-  // A site is "failing" if ANY of its checks fail
+  // A site is "failing" if ANY of its enabled checks fail
   const failingSites = [...failing].filter(id => failing.has(id));
   const passingSites = [...passing].filter(id => !failing.has(id));
 

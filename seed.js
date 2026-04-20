@@ -11,7 +11,7 @@ const defaultChecks = [
   { type: 'meta_pixel', config: {} },
   { type: 'google_ads', config: {} },
   { type: 'adform', config: {} },
-  { type: 'adobe_analytics', config: { trackingDomain: 'tracking-secure.csob.cz' } },
+  { type: 'adobe_analytics', config: { trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' } },
   { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
   { type: 'onetrust', config: {} },
   { type: 'sklik', config: {} },
@@ -84,6 +84,17 @@ if (existing.length > 0) {
     } else {
       console.log(`  Already exists: ${zone.name}`);
     }
+  }
+
+  // Update Adobe Analytics config to include reporting suite on all sites
+  const allSites = getAllSites();
+  const d = getDb();
+  const updated = d.prepare(`
+    UPDATE site_checks SET config = ? WHERE checker_type = 'adobe_analytics' AND
+    config NOT LIKE '%reportingSuite%'
+  `).run(JSON.stringify({ trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' }));
+  if (updated.changes > 0) {
+    console.log(`  Updated ${updated.changes} Adobe Analytics check(s) with reporting suite: kbcnvcsobczprod`);
   }
 
   console.log('Migration complete.');

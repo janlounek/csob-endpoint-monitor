@@ -2,12 +2,15 @@
  * Adobe Analytics checker
  * Supports: Legacy AppMeasurement, Adobe Web SDK (alloy.js / Edge Network)
  * Endpoints: tracking-secure.csob.cz, edge.adobedc.net, *.adobedc.net
+ * Can validate reporting suite ID (rsid) in requests.
  */
 module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
   const trackingDomain = config.trackingDomain || 'tracking-secure.csob.cz';
+  const expectedRsid = config.reportingSuite || '';
 
   const findings = {
     trackingDomain,
+    expectedRsid: expectedRsid || '(not configured)',
     // Legacy AppMeasurement
     appMeasurementFound: false,
     sObjectExists: false,
@@ -18,6 +21,9 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
     edgeRequests: 0,
     // Custom domain
     customDomainRequests: 0,
+    // Reporting suite
+    rsidFound: null,
+    rsidMatch: null,
     // General
     beaconRequests: [],
     reasons: [],
@@ -35,20 +41,33 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
            (typeof window.s_gi === 'function');
   }).catch(() => false);
 
+  // Try to get reporting suite from s object
+  var rsidFromObject = await page.evaluate(() => {
+    if (typeof window.s === 'object' && window.s !== null) {
+      return window.s.account || window.s.rsid || null;
+    }
+    return null;
+  }).catch(() => null);
+
+  if (rsidFromObject) findings.rsidFound = rsidFromObject;
+
   // --- Adobe Web SDK / alloy.js / Edge Network detection ---
   findings.alloySdkFound = await page.evaluate(() => {
-    return !!document.querySelector('script[src*="alloy"]') ||
-           !!document.querySelector('script[src*="launch-"]') ||
-           !!document.querySelector('script[src*="adobedc.net"]');
+    var scripts = document.querySelectorAll('script[src]');
+    for (var i = 0; i < scripts.length; i++) {
+      var src = scripts[i].src;
+      if (src.includes('alloy') || src.includes('launch-') ||
+          src.includes('adobedc.net') || src.includes('adoberesources.net')) return true;
+    }
+    return false;
   }).catch(() => false);
 
-  // Check for inline alloy/Web SDK config
   if (!findings.alloySdkFound) {
     findings.alloySdkFound = await page.evaluate(() => {
       var scripts = document.querySelectorAll('script');
       for (var i = 0; i < scripts.length; i++) {
         var t = scripts[i].textContent;
-        if (t && (t.includes('alloy(') || t.includes('configure') && t.includes('edgeConfigId') ||
+        if (t && (t.includes('alloy(') || (t.includes('configure') && t.includes('edgeConfigId')) ||
             t.includes('adobedc.net') || t.includes('edgeDomain'))) return true;
       }
       return false;
@@ -63,27 +82,43 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
 
   // --- Network checks ---
 
-  // Legacy: requests to /b/ss/ (Adobe collect endpoint) or s_i_ image beacons
-  var legacyPatterns = [
-    /\/b\/ss\//,
-    /2o7\.net/,
-    /omtrdc\.net/,
-    /sc\.omtrdc\.net/,
-    /demdex\.net/,
-  ];
-  for (var i = 0; i < legacyPatterns.length; i++) {
-    findings.legacyRequests += interceptor.getRequestsMatching(legacyPatterns[i]).length;
+  // Legacy: /b/ss/ requests (contain rsid in path)
+  var bssRequests = interceptor.getRequestsMatching(/\/b\/ss\//);
+  findings.legacyRequests += bssRequests.length;
+
+  // Extract rsid from /b/ss/{rsid}/ path
+  for (var i = 0; i < bssRequests.length; i++) {
+    try {
+      var match = bssRequests[i].url.match(/\/b\/ss\/([^/]+)\//);
+      if (match) {
+        findings.rsidFound = match[1];
+        break;
+      }
+    } catch (e) {}
   }
 
-  // Edge Network: requests to edge.adobedc.net or *.adobedc.net
-  var edgePatterns = [
-    /edge\.adobedc\.net/,
-    /adobedc\.net/,
-    /edge\.adobedc/,
-    /interact\?/,  // Edge Network interact endpoint
-  ];
+  var otherLegacyPatterns = [/2o7\.net/, /omtrdc\.net/, /sc\.omtrdc\.net/, /demdex\.net/];
+  for (var i = 0; i < otherLegacyPatterns.length; i++) {
+    findings.legacyRequests += interceptor.getRequestsMatching(otherLegacyPatterns[i]).length;
+  }
+
+  // Edge Network requests
+  var edgePatterns = [/edge\.adobedc\.net/, /adobedc\.net/, /interact\?/];
   for (var i = 0; i < edgePatterns.length; i++) {
     findings.edgeRequests += interceptor.getRequestsMatching(edgePatterns[i]).length;
+  }
+
+  // Try to extract rsid from Edge Network requests (often in query params or body)
+  if (!findings.rsidFound) {
+    var edgeReqs = interceptor.getRequestsMatching(/adobedc\.net/);
+    for (var i = 0; i < edgeReqs.length; i++) {
+      try {
+        var url = edgeReqs[i].url;
+        // rsid can appear in configId or dataset params
+        var rsidMatch = url.match(/rsid[s]?=([^&]+)/) || url.match(/reportSuite[s]?=([^&]+)/);
+        if (rsidMatch) { findings.rsidFound = rsidMatch[1]; break; }
+      } catch (e) {}
+    }
   }
 
   // Custom tracking domain
@@ -91,9 +126,18 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
   var customRequests = interceptor.getRequestsMatching(new RegExp(escapedDomain));
   findings.customDomainRequests = customRequests.length;
 
-  // Log sample requests for debugging
-  var allTrackingRequests = [].concat(
-    interceptor.getRequestsMatching(/\/b\/ss\//),
+  // Also try to find rsid in custom domain requests
+  if (!findings.rsidFound) {
+    for (var i = 0; i < customRequests.length; i++) {
+      try {
+        var m = customRequests[i].url.match(/\/b\/ss\/([^/]+)\//);
+        if (m) { findings.rsidFound = m[1]; break; }
+      } catch (e) {}
+    }
+  }
+
+  // Log sample requests
+  var allTrackingRequests = [].concat(bssRequests,
     interceptor.getRequestsMatching(/adobedc\.net/),
     interceptor.getRequestsMatching(/omtrdc\.net/),
     customRequests
@@ -103,14 +147,26 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
     catch (e) { return r.url.substring(0, 120); }
   });
 
+  // --- Reporting suite validation ---
+  if (expectedRsid && findings.rsidFound) {
+    // rsid can be comma-separated list of suites
+    var foundSuites = findings.rsidFound.split(',').map(function(s) { return s.trim().toLowerCase(); });
+    findings.rsidMatch = foundSuites.includes(expectedRsid.toLowerCase());
+  }
+
   // --- Determine pass/fail ---
   var hasLegacy = findings.appMeasurementFound || findings.sObjectExists || findings.legacyRequests > 0;
   var hasEdge = findings.alloySdkFound || findings.alloyExists || findings.edgeRequests > 0;
   var hasCustom = findings.customDomainRequests > 0;
-  var anyFound = hasLegacy || hasEdge || hasCustom;
+  var analyticsPresent = hasLegacy || hasEdge || hasCustom;
+
+  // If rsid validation is configured, it must match
+  var rsidOk = !expectedRsid || findings.rsidMatch === true;
+
+  var pass = analyticsPresent && rsidOk;
 
   // Build reasons
-  if (anyFound) {
+  if (analyticsPresent) {
     var parts = [];
     if (findings.appMeasurementFound) parts.push('AppMeasurement script loaded');
     if (findings.sObjectExists) parts.push('s object active');
@@ -119,7 +175,18 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
     if (findings.legacyRequests > 0) parts.push(findings.legacyRequests + ' legacy collect request(s)');
     if (findings.edgeRequests > 0) parts.push(findings.edgeRequests + ' Edge Network request(s)');
     if (findings.customDomainRequests > 0) parts.push(findings.customDomainRequests + ' request(s) to ' + trackingDomain);
-    findings.reasons = ['OK: ' + parts.join(', ')];
+    if (findings.rsidFound) parts.push('RSID: ' + findings.rsidFound);
+
+    if (expectedRsid && findings.rsidMatch === false) {
+      findings.reasons = [
+        'FAIL: Analytics is present but reporting suite mismatch',
+        'Expected RSID: ' + expectedRsid,
+        'Found RSID: ' + (findings.rsidFound || 'none detected'),
+        'OK (analytics): ' + parts.join(', '),
+      ];
+    } else {
+      findings.reasons = ['OK: ' + parts.join(', ')];
+    }
   } else {
     findings.reasons.push('No AppMeasurement/s_code script found in DOM');
     findings.reasons.push('No Adobe Web SDK (alloy.js) found');
@@ -127,5 +194,5 @@ module.exports = async function checkAdobeAnalytics(page, interceptor, config) {
     findings.reasons.push('No requests to adobedc.net, omtrdc.net, or ' + trackingDomain);
   }
 
-  return { status: anyFound ? 'pass' : 'fail', details: findings };
+  return { status: pass ? 'pass' : 'fail', details: findings };
 };
