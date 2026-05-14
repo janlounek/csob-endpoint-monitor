@@ -52,17 +52,27 @@ function formatReasons(details) {
   }).join('');
 }
 
+function currentClientSlug() {
+  return (typeof CLIENT_SLUG !== 'undefined' && CLIENT_SLUG) ? CLIENT_SLUG : null;
+}
+
 // --- Polling ---
 
 var pollTimer = null;
 
 function startPolling(callback, interval) {
   stopPolling();
+  var slug = currentClientSlug();
+  var statusPath = slug ? '/clients/' + slug + '/status' : '/status';
   pollTimer = setInterval(async function() {
-    var status = await api('/status');
-    if (!status.isRunning) {
+    try {
+      var status = await api(statusPath);
+      if (!status.isRunning) {
+        stopPolling();
+        if (callback) callback();
+      }
+    } catch (e) {
       stopPolling();
-      if (callback) callback();
     }
   }, interval || 3000);
 }
@@ -76,7 +86,118 @@ function enableRunBtn() {
   if (btn) { btn.disabled = false; btn.textContent = 'Run All Checks'; }
 }
 
-// --- Dashboard (grouped by domain, clean) ---
+// --- Landing page (clients list) ---
+
+function renderClientCard(c) {
+  var hasFailing = c.sites_failing > 0;
+  var statusClass = hasFailing ? 'fail' : (c.sites_total > 0 ? 'pass' : 'unknown');
+  var statusText = c.sites_total === 0
+    ? 'No sites yet'
+    : (hasFailing ? c.sites_failing + ' failing' : 'All ' + c.sites_total + ' passing');
+  var webhookBadge = c.has_webhook ? '' : '<span class="badge-warn" title="No Slack webhook configured">No Slack</span>';
+  return '<a class="client-card" href="/c/' + escapeHtml(c.slug) + '">' +
+    '<div class="client-card-head">' +
+      '<h3>' + escapeHtml(c.name) + '</h3>' +
+      '<span class="status-dot ' + statusClass + '"></span>' +
+    '</div>' +
+    '<div class="client-card-meta">' +
+      '<span class="muted">' + c.sites_total + ' site' + (c.sites_total === 1 ? '' : 's') + '</span>' +
+      ' &middot; <span class="' + (hasFailing ? 'text-fail' : 'text-pass') + '">' + statusText + '</span>' +
+    '</div>' +
+    '<div class="client-card-footer">' +
+      '<code class="slug">/c/' + escapeHtml(c.slug) + '</code>' +
+      webhookBadge +
+    '</div>' +
+  '</a>';
+}
+
+async function loadClients() {
+  try {
+    var clients = await api('/clients');
+    var grid = document.getElementById('clients-grid');
+    if (clients.length === 0) {
+      grid.innerHTML = '<p class="loading">No clients yet. <a href="/clients/new">Add your first client</a> to start monitoring.</p>';
+      return;
+    }
+    grid.innerHTML = clients.map(renderClientCard).join('');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// --- Client form ---
+
+async function saveClient(event) {
+  event.preventDefault();
+  var form = event.target;
+  var body = {
+    name: form.querySelector('#name').value,
+    slug: form.querySelector('#slug').value,
+    slack_webhook_url: form.querySelector('#slack_webhook_url').value,
+  };
+  try {
+    if (typeof EDIT_MODE !== 'undefined' && EDIT_MODE) {
+      var resp = await api('/clients/' + CLIENT_SLUG, { method: 'PUT', body: JSON.stringify(body) });
+      toast('Client updated');
+      window.location.href = '/c/' + (resp.slug || CLIENT_SLUG);
+    } else {
+      var resp = await api('/clients', { method: 'POST', body: JSON.stringify(body) });
+      toast('Client created');
+      window.location.href = '/c/' + resp.slug;
+    }
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function deleteClient(slug) {
+  if (!confirm('Delete this client and ALL its sites and check history? This cannot be undone.')) return;
+  try {
+    await api('/clients/' + slug, { method: 'DELETE' });
+    toast('Client deleted');
+    window.location.href = '/';
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// --- Client settings ---
+
+async function loadClientSettings() {
+  try {
+    var c = await api('/clients/' + CLIENT_SLUG);
+    var input = document.getElementById('slack_webhook_url');
+    if (input) input.value = c.slack_webhook_url || '';
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function saveClientSettings(event) {
+  event.preventDefault();
+  try {
+    var slack_webhook_url = document.getElementById('slack_webhook_url').value;
+    await api('/clients/' + CLIENT_SLUG, { method: 'PUT', body: JSON.stringify({ slack_webhook_url: slack_webhook_url }) });
+    toast('Saved');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function testClientSlack() {
+  var resultEl = document.getElementById('slack-test-result');
+  resultEl.textContent = 'Sending...';
+  try {
+    await api('/clients/' + CLIENT_SLUG + '/test-slack', { method: 'POST' });
+    resultEl.textContent = 'Sent!';
+    resultEl.style.color = 'var(--success)';
+  } catch (e) {
+    resultEl.textContent = e.message;
+    resultEl.style.color = 'var(--danger)';
+  }
+}
+
+// --- Dashboard (client-scoped) ---
 
 function renderSiteChecks(site) {
   return (site.checks || []).filter(function(c) {
@@ -95,6 +216,7 @@ function getLastChecked(site) {
 }
 
 function renderSiteRow(site) {
+  var slug = currentClientSlug();
   var checks = renderSiteChecks(site);
   var lastChecked = getLastChecked(site);
   var isPrivate = site.isPrivate;
@@ -102,19 +224,25 @@ function renderSiteRow(site) {
   var nameClass = isPrivate ? 'site-name-child' : 'site-name';
   var prefix = isPrivate ? '<span class="child-indicator"></span>' : '';
   var typeLabel = isPrivate ? '<span class="type-badge private">Private zone</span>' : '';
+  var sitePath = '/c/' + slug + '/sites/' + site.id;
 
   return '<tr class="' + rowClass + '">' +
-    '<td class="' + nameClass + '">' + prefix + '<a href="/sites/' + site.id + '">' + escapeHtml(site.name) + '</a> ' + typeLabel + '</td>' +
+    '<td class="' + nameClass + '">' + prefix + '<a href="' + sitePath + '">' + escapeHtml(site.name) + '</a> ' + typeLabel + '</td>' +
     '<td><a href="' + escapeHtml(site.url) + '" target="_blank" class="site-url">' + escapeHtml(site.url) + '</a></td>' +
     '<td><div class="check-badges">' + (checks || '<span class="text-muted">No checks</span>') + '</div></td>' +
     '<td>' + timeAgo(lastChecked) + '</td>' +
-    '<td><a href="/sites/' + site.id + '" class="btn btn-sm btn-secondary">Logs</a></td>' +
+    '<td><a href="' + sitePath + '" class="btn btn-sm btn-secondary">Logs</a></td>' +
     '</tr>';
 }
 
 async function loadDashboard() {
   try {
-    var data = await Promise.all([api('/sites?grouped=1'), api('/status')]);
+    var slug = currentClientSlug();
+    if (!slug) return;
+    var data = await Promise.all([
+      api('/clients/' + slug + '/sites?grouped=1'),
+      api('/clients/' + slug + '/status'),
+    ]);
     var groups = data[0];
     var status = data[1];
 
@@ -124,16 +252,14 @@ async function loadDashboard() {
 
     var tbody = document.getElementById('sites-tbody');
     if (groups.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="loading">No sites configured. <a href="/sites/new">Add one</a></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="loading">No sites configured. <a href="/c/' + slug + '/sites/new">Add one</a></td></tr>';
       return;
     }
 
     var html = '';
     for (var i = 0; i < groups.length; i++) {
       var group = groups[i];
-      // Domain header row
       html += '<tr class="domain-header-row"><td colspan="5" class="domain-header">' + escapeHtml(group.domain) + '</td></tr>';
-      // Site rows within this domain
       var sites = group.sites || [];
       for (var j = 0; j < sites.length; j++) {
         html += renderSiteRow(sites[j]);
@@ -153,15 +279,16 @@ async function loadDashboard() {
 }
 
 async function runAllChecks() {
+  var slug = currentClientSlug();
   var btn = document.getElementById('run-all-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Scanning...';
   try {
-    await api('/check/run', { method: 'POST' });
-    toast('Scan started. Checking all sites...');
+    await api('/clients/' + slug + '/check/run', { method: 'POST' });
+    toast('Scan started.');
     startPolling(function() { loadDashboard(); enableRunBtn(); });
   } catch (e) {
-    if (e.message.includes('already running')) {
+    if (e.message.indexOf('already running') !== -1) {
       toast('Scan already in progress...');
       startPolling(function() { loadDashboard(); enableRunBtn(); });
     } else {
@@ -176,16 +303,14 @@ async function runSiteCheck(siteId) {
     await api('/check/run/' + siteId, { method: 'POST' });
     toast('Checking site...');
     startPolling(function() {
-      if (typeof SITE_ID !== 'undefined') {
-        loadSiteDetail(SITE_ID);
-      }
+      if (typeof SITE_ID !== 'undefined') loadSiteDetail(SITE_ID);
     });
   } catch (e) {
     toast(e.message, 'error');
   }
 }
 
-// --- Site Detail (full logs with reasons) ---
+// --- Site Detail ---
 
 var resultsOffset = 0;
 
@@ -270,7 +395,7 @@ async function deleteSite(siteId) {
   try {
     await api('/sites/' + siteId, { method: 'DELETE' });
     toast('Site deleted');
-    window.location.href = '/';
+    window.location.href = '/c/' + currentClientSlug();
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -303,28 +428,27 @@ async function saveSite(event) {
   }
 
   try {
+    var slug = currentClientSlug();
     if (typeof EDIT_MODE !== 'undefined' && EDIT_MODE) {
       await api('/sites/' + SITE_ID, { method: 'PUT', body: JSON.stringify({ name: name, url: url, checks: checks }) });
       toast('Site updated');
-      window.location.href = '/sites/' + SITE_ID;
+      window.location.href = '/c/' + slug + '/sites/' + SITE_ID;
     } else {
-      var result = await api('/sites', { method: 'POST', body: JSON.stringify({ name: name, url: url, checks: checks }) });
+      var result = await api('/clients/' + slug + '/sites', { method: 'POST', body: JSON.stringify({ name: name, url: url, checks: checks }) });
       toast('Site created');
-      window.location.href = '/sites/' + result.id;
+      window.location.href = '/c/' + slug + '/sites/' + result.id;
     }
   } catch (e) {
     toast(e.message, 'error');
   }
 }
 
-// --- Settings ---
+// --- Global settings ---
 
 async function loadSettings() {
   try {
     var settings = await api('/settings');
-    var webhookInput = document.getElementById('slack_webhook_url');
     var cronInput = document.getElementById('cron_schedule');
-    if (webhookInput) webhookInput.value = settings.slack_webhook_url || '';
     if (cronInput) cronInput.value = settings.cron_schedule || '0 */4 * * *';
   } catch (e) {
     toast(e.message, 'error');
@@ -334,24 +458,10 @@ async function loadSettings() {
 async function saveSettings(event) {
   event.preventDefault();
   try {
-    var slack_webhook_url = document.getElementById('slack_webhook_url').value;
     var cron_schedule = document.getElementById('cron_schedule').value;
-    await api('/settings', { method: 'PUT', body: JSON.stringify({ slack_webhook_url: slack_webhook_url, cron_schedule: cron_schedule }) });
+    await api('/settings', { method: 'PUT', body: JSON.stringify({ cron_schedule: cron_schedule }) });
     toast('Settings saved');
   } catch (e) {
     toast(e.message, 'error');
-  }
-}
-
-async function testSlack() {
-  var resultEl = document.getElementById('slack-test-result');
-  resultEl.textContent = 'Sending...';
-  try {
-    await api('/settings/test-slack', { method: 'POST' });
-    resultEl.textContent = 'Sent!';
-    resultEl.style.color = 'var(--success)';
-  } catch (e) {
-    resultEl.textContent = e.message;
-    resultEl.style.color = 'var(--danger)';
   }
 }

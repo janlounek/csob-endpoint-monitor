@@ -3,17 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Marketing Monitor</title>
+  <title><%= (typeof currentClient !== 'undefined' && currentClient) ? currentClient.name + ' — Endpoint Monitor' : 'Endpoint Monitor' %></title>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/app.js" defer></script>
 </head>
 <body>
   <nav class="navbar">
-    <a href="/" class="nav-brand">Marketing Monitor</a>
+    <a href="/" class="nav-brand">Endpoint Monitor</a>
     <div class="nav-links">
-      <a href="/">Dashboard</a>
-      <a href="/sites/new">Add Site</a>
-      <a href="/settings">Settings</a>
+      <% if (typeof currentClient !== 'undefined' && currentClient) { %>
+        <a href="/">All clients</a>
+        <a href="/c/<%= currentClient.slug %>"><%= currentClient.name %> dashboard</a>
+        <a href="/c/<%= currentClient.slug %>/sites/new">Add site</a>
+        <a href="/c/<%= currentClient.slug %>/settings">Client settings</a>
+        <a href="/settings">Global</a>
+      <% } else { %>
+        <a href="/">All clients</a>
+        <a href="/clients/new">Add client</a>
+        <a href="/settings">Global settings</a>
+      <% } %>
     </div>
   </nav>
   <main class="container">

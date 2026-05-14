@@ -1,10 +1,20 @@
 /**
  * Seeds the database with CSOB sites and their marketing endpoint checks.
  * Sets up parent/child groupings for public portals and private zones.
+ * All sites are assigned to the 'csob' client.
  */
-const { initDb, createSite, getAllSites, updateSite, getDb } = require('./db/database');
+const { initDb, createSite, getAllSites, updateSite, getDb, getClientBySlug, createClient } = require('./db/database');
 
 initDb();
+
+// Ensure the CSOB client exists (created automatically by the migration, but make sure here too)
+let csobClient = getClientBySlug('csob');
+if (!csobClient) {
+  const id = createClient({ name: 'CSOB', slug: 'csob' });
+  csobClient = { id };
+  console.log(`Created 'CSOB' client (id=${id})`);
+}
+const csobClientId = csobClient.id;
 
 // All check types for public sites
 const defaultChecks = [
@@ -91,7 +101,7 @@ if (existing.length > 0) {
   for (const s of newSites) {
     if (!siteMap[s.name]) {
       const checks = s.site_type === 'private' ? privateChecks : defaultChecks;
-      const id = createSite({ name: s.name, url: s.url, checks: checks, site_type: s.site_type });
+      const id = createSite({ name: s.name, url: s.url, checks: checks, site_type: s.site_type, client_id: csobClientId });
       console.log(`  Created: ${s.name} (ID: ${id})`);
     } else {
       console.log(`  Already exists: ${s.name}`);
@@ -130,7 +140,7 @@ console.log('Seeding fresh database...');
 // Create public portals first
 const parentIds = {};
 for (const site of publicSites) {
-  const id = createSite({ ...site, checks: defaultChecks, site_type: 'public' });
+  const id = createSite({ ...site, checks: defaultChecks, site_type: 'public', client_id: csobClientId });
   parentIds[site.name] = id;
   console.log(`  Created: ${site.name} (ID: ${id})`);
 }
@@ -138,7 +148,7 @@ for (const site of publicSites) {
 // Create private zones linked to parents
 for (const zone of privateZones) {
   const parentId = parentIds[zone.parent];
-  const id = createSite({ name: zone.name, url: zone.url, checks: privateChecks, parent_id: parentId, site_type: 'private' });
+  const id = createSite({ name: zone.name, url: zone.url, checks: privateChecks, parent_id: parentId, site_type: 'private', client_id: csobClientId });
   console.log(`  Created: ${zone.name} (ID: ${id}) -> ${zone.parent} (ID: ${parentId})`);
 }
 

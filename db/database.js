@@ -13,13 +13,32 @@ function getDb() {
     const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
     db.exec(schema);
 
-    // Migration: add parent_id and site_type if missing
-    const cols = db.prepare("PRAGMA table_info(sites)").all().map(c => c.name);
-    if (!cols.includes('parent_id')) {
+    // Migrations
+    const siteCols = db.prepare("PRAGMA table_info(sites)").all().map(c => c.name);
+    if (!siteCols.includes('parent_id')) {
       db.exec('ALTER TABLE sites ADD COLUMN parent_id INTEGER REFERENCES sites(id) ON DELETE SET NULL');
     }
-    if (!cols.includes('site_type')) {
+    if (!siteCols.includes('site_type')) {
       db.exec("ALTER TABLE sites ADD COLUMN site_type TEXT DEFAULT 'public'");
+    }
+    if (!siteCols.includes('client_id')) {
+      db.exec('ALTER TABLE sites ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE');
+    }
+
+    // Backfill: if there are sites without a client_id, create a default CSOB client
+    // and move them under it (preserves existing production data).
+    const orphanCount = db.prepare('SELECT COUNT(*) AS c FROM sites WHERE client_id IS NULL').get().c;
+    if (orphanCount > 0) {
+      let csob = db.prepare("SELECT id FROM clients WHERE slug = 'csob'").get();
+      if (!csob) {
+        const oldWebhook = db.prepare("SELECT value FROM settings WHERE key = 'slack_webhook_url'").get();
+        const webhook = oldWebhook ? oldWebhook.value : null;
+        const r = db.prepare("INSERT INTO clients (name, slug, slack_webhook_url) VALUES (?, ?, ?)").run('CSOB', 'csob', webhook);
+        csob = { id: r.lastInsertRowid };
+        console.log(`Migration: created default 'CSOB' client (id=${csob.id})`);
+      }
+      const upd = db.prepare('UPDATE sites SET client_id = ? WHERE client_id IS NULL').run(csob.id);
+      console.log(`Migration: moved ${upd.changes} existing site(s) under 'CSOB' client.`);
     }
   }
   return db;
@@ -29,44 +48,84 @@ function initDb() {
   getDb();
 }
 
+// --- Clients ---
+
+function getAllClients() {
+  return getDb().prepare(`
+    SELECT c.*,
+      (SELECT COUNT(*) FROM sites s WHERE s.client_id = c.id) AS site_count
+    FROM clients c
+    ORDER BY c.name
+  `).all();
+}
+
+function getClientBySlug(slug) {
+  return getDb().prepare('SELECT * FROM clients WHERE slug = ?').get(slug);
+}
+
+function getClientById(id) {
+  return getDb().prepare('SELECT * FROM clients WHERE id = ?').get(id);
+}
+
+function createClient({ name, slug, slack_webhook_url = null }) {
+  const r = getDb().prepare(
+    'INSERT INTO clients (name, slug, slack_webhook_url) VALUES (?, ?, ?)'
+  ).run(name, slug, slack_webhook_url);
+  return r.lastInsertRowid;
+}
+
+function updateClient(id, { name, slug, slack_webhook_url }) {
+  const d = getDb();
+  const fields = [];
+  const values = [];
+  if (name !== undefined) { fields.push('name = ?'); values.push(name); }
+  if (slug !== undefined) { fields.push('slug = ?'); values.push(slug); }
+  if (slack_webhook_url !== undefined) { fields.push('slack_webhook_url = ?'); values.push(slack_webhook_url || null); }
+  if (fields.length === 0) return;
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  d.prepare(`UPDATE clients SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+function deleteClient(id) {
+  getDb().prepare('DELETE FROM clients WHERE id = ?').run(id);
+}
+
 // --- Sites ---
 
-function getAllSites() {
+function getAllSites(clientId = null) {
+  const where = clientId ? 'WHERE s.client_id = ?' : '';
+  const params = clientId ? [clientId] : [];
   return getDb().prepare(`
     SELECT s.*,
       (SELECT json_group_array(json_object(
         'id', sc.id, 'checker_type', sc.checker_type, 'config', sc.config, 'enabled', sc.enabled
       )) FROM site_checks sc WHERE sc.site_id = s.id) AS checks
-    FROM sites s ORDER BY s.parent_id NULLS FIRST, s.site_type, s.name
-  `).all().map(row => ({
+    FROM sites s ${where}
+    ORDER BY s.parent_id NULLS FIRST, s.site_type, s.name
+  `).all(...params).map(row => ({
     ...row,
     checks: JSON.parse(row.checks || '[]')
   }));
 }
 
-function getGroupedSites() {
-  const all = getAllSites();
-  const parents = all.filter(s => !s.parent_id);
-  const children = all.filter(s => s.parent_id);
-
-  return parents.map(parent => ({
-    ...parent,
-    children: children.filter(c => c.parent_id === parent.id),
-  }));
+function getSitesByClientId(clientId) {
+  return getAllSites(clientId);
 }
 
 function getSiteById(id) {
   const site = getDb().prepare('SELECT * FROM sites WHERE id = ?').get(id);
   if (!site) return null;
   site.checks = getDb().prepare('SELECT * FROM site_checks WHERE site_id = ?').all(id);
-  // Include children
   site.children = getDb().prepare('SELECT * FROM sites WHERE parent_id = ?').all(id);
   return site;
 }
 
-function createSite({ name, url, checks = [], parent_id = null, site_type = 'public' }) {
+function createSite({ name, url, checks = [], parent_id = null, site_type = 'public', client_id = null }) {
   const d = getDb();
-  const result = d.prepare('INSERT INTO sites (name, url, parent_id, site_type) VALUES (?, ?, ?, ?)').run(name, url, parent_id, site_type);
+  const result = d.prepare(
+    'INSERT INTO sites (client_id, name, url, parent_id, site_type) VALUES (?, ?, ?, ?, ?)'
+  ).run(client_id, name, url, parent_id, site_type);
   const siteId = result.lastInsertRowid;
   const insertCheck = d.prepare('INSERT INTO site_checks (site_id, checker_type, config) VALUES (?, ?, ?)');
   for (const check of checks) {
@@ -75,7 +134,7 @@ function createSite({ name, url, checks = [], parent_id = null, site_type = 'pub
   return siteId;
 }
 
-function updateSite(id, { name, url, enabled, checks, parent_id, site_type }) {
+function updateSite(id, { name, url, enabled, checks, parent_id, site_type, client_id }) {
   const d = getDb();
   const fields = [];
   const values = [];
@@ -84,6 +143,7 @@ function updateSite(id, { name, url, enabled, checks, parent_id, site_type }) {
   if (enabled !== undefined) { fields.push('enabled = ?'); values.push(enabled ? 1 : 0); }
   if (parent_id !== undefined) { fields.push('parent_id = ?'); values.push(parent_id); }
   if (site_type !== undefined) { fields.push('site_type = ?'); values.push(site_type); }
+  if (client_id !== undefined) { fields.push('client_id = ?'); values.push(client_id); }
   if (fields.length > 0) {
     fields.push("updated_at = datetime('now')");
     values.push(id);
@@ -170,8 +230,14 @@ function getAllSettings() {
 module.exports = {
   initDb,
   getDb,
+  getAllClients,
+  getClientBySlug,
+  getClientById,
+  createClient,
+  updateClient,
+  deleteClient,
   getAllSites,
-  getGroupedSites,
+  getSitesByClientId,
   getSiteById,
   createSite,
   updateSite,

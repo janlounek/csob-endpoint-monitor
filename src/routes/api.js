@@ -10,7 +10,6 @@ const scheduler = require('../scheduler');
 function getRootDomain(urlStr) {
   try {
     const hostname = new URL(urlStr).hostname;
-    // Split by dots, take last 2 parts (handles .cz, .com, etc.)
     const parts = hostname.split('.');
     if (parts.length >= 2) {
       return parts.slice(-2).join('.');
@@ -25,7 +24,6 @@ function isPrivateZone(urlStr) {
   try {
     const hostname = new URL(urlStr).hostname;
     const pathname = new URL(urlStr).pathname;
-    // Sites that are clearly private zones / login areas
     const privatePatterns = [
       /^identita\./,
       /^online\./,
@@ -43,63 +41,197 @@ function isPrivateZone(urlStr) {
   }
 }
 
-// --- Sites ---
+function slugify(s) {
+  return String(s).toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
 
-router.get('/sites', (req, res) => {
-  const latestResults = db.getLatestResultsForAllSites();
+function attachResults(site, latestResults) {
+  const results = latestResults.filter(r => r.site_id === site.id);
+  const statusMap = {};
+  for (const r of results) {
+    statusMap[r.check_type] = { status: r.status, details: r.details, checked_at: r.checked_at };
+  }
+  const isPrivate = site.site_type === 'private' || isPrivateZone(site.url);
+  return { ...site, latestResults: statusMap, isPrivate };
+}
 
-  function attachResults(site) {
-    const results = latestResults.filter(r => r.site_id === site.id);
-    const statusMap = {};
-    for (const r of results) {
-      statusMap[r.check_type] = { status: r.status, details: r.details, checked_at: r.checked_at };
-    }
-    const isPrivate = site.site_type === 'private' || isPrivateZone(site.url);
-    return { ...site, latestResults: statusMap, isPrivate };
+function clientSummary(client, allLatest) {
+  const sites = db.getSitesByClientId(client.id);
+  const siteIds = new Set(sites.map(s => s.id));
+
+  const enabledChecks = {};
+  for (const s of sites) {
+    enabledChecks[s.id] = new Set((s.checks || []).filter(c => c.enabled).map(c => c.checker_type));
   }
 
-  if (req.query.grouped === '1') {
-    const sites = db.getAllSites().map(attachResults);
+  const passing = new Set();
+  const failing = new Set();
+  for (const r of allLatest) {
+    if (!siteIds.has(r.site_id)) continue;
+    const enabled = enabledChecks[r.site_id];
+    if (!enabled || !enabled.has(r.check_type)) continue;
+    if (r.status === 'pass') passing.add(r.site_id);
+    else failing.add(r.site_id);
+  }
 
-    // Group by root domain
+  return {
+    ...client,
+    has_webhook: !!client.slack_webhook_url,
+    slack_webhook_url: undefined,  // don't leak the webhook in lists
+    sites_total: sites.length,
+    sites_passing: [...passing].filter(id => !failing.has(id)).length,
+    sites_failing: failing.size,
+  };
+}
+
+// --- Clients ---
+
+router.get('/clients', (req, res) => {
+  const clients = db.getAllClients();
+  const allLatest = db.getLatestResultsForAllSites();
+  res.json(clients.map(c => clientSummary(c, allLatest)));
+});
+
+router.post('/clients', (req, res) => {
+  const { name, slug, slack_webhook_url } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+
+  const finalSlug = (slug && slugify(slug)) || slugify(name);
+  if (!finalSlug) return res.status(400).json({ error: 'name must contain alphanumeric characters' });
+
+  const existing = db.getClientBySlug(finalSlug);
+  if (existing) return res.status(409).json({ error: `Client with slug "${finalSlug}" already exists` });
+
+  try {
+    const id = db.createClient({ name, slug: finalSlug, slack_webhook_url: slack_webhook_url || null });
+    res.status(201).json({ id, slug: finalSlug, message: 'Client created' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/clients/:slug', (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const allLatest = db.getLatestResultsForAllSites();
+  res.json({ ...clientSummary(client, allLatest), slack_webhook_url: client.slack_webhook_url || '' });
+});
+
+router.put('/clients/:slug', (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  const update = {};
+  if (req.body.name !== undefined) update.name = req.body.name;
+  if (req.body.slack_webhook_url !== undefined) update.slack_webhook_url = req.body.slack_webhook_url;
+  if (req.body.slug !== undefined) {
+    const newSlug = slugify(req.body.slug);
+    if (!newSlug) return res.status(400).json({ error: 'Invalid slug' });
+    if (newSlug !== client.slug && db.getClientBySlug(newSlug)) {
+      return res.status(409).json({ error: 'Slug already in use' });
+    }
+    update.slug = newSlug;
+  }
+
+  try {
+    db.updateClient(client.id, update);
+    res.json({ message: 'Client updated', slug: update.slug || client.slug });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/clients/:slug', (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  db.deleteClient(client.id);
+  res.json({ message: 'Client deleted' });
+});
+
+router.post('/clients/:slug/test-slack', async (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  try {
+    await sendTestMessage(client.slack_webhook_url, client.name);
+    res.json({ message: 'Test message sent' });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// --- Sites (client-scoped) ---
+
+router.get('/clients/:slug/sites', (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  const latestResults = db.getLatestResultsForAllSites();
+  const sites = db.getSitesByClientId(client.id).map(s => attachResults(s, latestResults));
+
+  if (req.query.grouped === '1') {
     const domainGroups = {};
     for (const site of sites) {
       const root = getRootDomain(site.url);
       if (!domainGroups[root]) domainGroups[root] = [];
       domainGroups[root].push(site);
     }
-
-    // Build grouped output: public sites first, then private zones
     const grouped = Object.entries(domainGroups).map(([domain, members]) => {
-      // Sort: public (non-private) first, then private
       members.sort((a, b) => (a.isPrivate ? 1 : 0) - (b.isPrivate ? 1 : 0));
-      return {
-        domain,
-        sites: members,
-      };
+      return { domain, sites: members };
     });
-
-    // Sort groups alphabetically by domain
     grouped.sort((a, b) => a.domain.localeCompare(b.domain));
-
     return res.json(grouped);
   }
 
-  const sites = db.getAllSites();
-  res.json(sites.map(attachResults));
+  res.json(sites);
 });
 
-router.post('/sites', (req, res) => {
+router.post('/clients/:slug/sites', (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
   const { name, url, checks } = req.body;
   if (!name || !url) return res.status(400).json({ error: 'name and url are required' });
 
   try {
-    const id = db.createSite({ name, url, checks: checks || [] });
+    const id = db.createSite({ name, url, checks: checks || [], client_id: client.id });
     res.status(201).json({ id, message: 'Site created' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
+router.get('/clients/:slug/status', (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  const sites = db.getSitesByClientId(client.id);
+  const allLatest = db.getLatestResultsForAllSites();
+  const summary = clientSummary(client, allLatest);
+
+  res.json({
+    totalSites: summary.sites_total,
+    enabledSites: sites.filter(s => s.enabled).length,
+    passing: summary.sites_passing,
+    failing: summary.sites_failing,
+    isRunning: isRunning(),
+    checkerTypes: CHECKER_LABELS,
+  });
+});
+
+router.post('/clients/:slug/check/run', async (req, res) => {
+  const client = db.getClientBySlug(req.params.slug);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  if (isRunning()) return res.status(409).json({ error: 'Check cycle already running' });
+
+  res.json({ message: 'Check cycle started' });
+  runAllChecks(client.id).catch(e => console.error('Manual check failed:', e.message));
+});
+
+// --- Site-scoped (still keyed by site id; client inferred from site) ---
 
 router.get('/sites/:id', (req, res) => {
   const site = db.getSiteById(parseInt(req.params.id));
@@ -131,8 +263,6 @@ router.delete('/sites/:id', (req, res) => {
   res.json({ message: 'Site deleted' });
 });
 
-// --- Check Results ---
-
 router.get('/sites/:id/results', (req, res) => {
   const id = parseInt(req.params.id);
   const limit = parseInt(req.query.limit) || 50;
@@ -141,41 +271,30 @@ router.get('/sites/:id/results', (req, res) => {
   res.json(results);
 });
 
-// --- Run Checks ---
-
-router.post('/check/run', async (req, res) => {
-  if (isRunning()) return res.status(409).json({ error: 'Check cycle already running' });
-
-  res.json({ message: 'Check cycle started' });
-  // Run async — don't block the response
-  runAllChecks().catch(e => console.error('Manual check failed:', e.message));
-});
-
 router.post('/check/run/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     res.json({ message: 'Check started' });
     await runSingleSiteCheck(id);
   } catch (e) {
-    // Response already sent, log the error
     console.error(`Single site check failed for ${id}:`, e.message);
   }
 });
 
-// --- Settings ---
+// --- Global Settings (cron only — Slack is per-client now) ---
 
 router.get('/settings', (req, res) => {
   const settings = db.getAllSettings();
-  // Provide defaults
   settings.cron_schedule = settings.cron_schedule || '0 */4 * * *';
   settings.check_timeout_ms = settings.check_timeout_ms || '30000';
+  // Strip the legacy global webhook so it isn't exposed.
+  delete settings.slack_webhook_url;
   res.json(settings);
 });
 
 router.put('/settings', (req, res) => {
-  const { slack_webhook_url, cron_schedule } = req.body;
+  const { cron_schedule } = req.body;
 
-  if (slack_webhook_url !== undefined) db.setSetting('slack_webhook_url', slack_webhook_url);
   if (cron_schedule !== undefined) {
     const cron = require('node-cron');
     if (!cron.validate(cron_schedule)) {
@@ -188,50 +307,38 @@ router.put('/settings', (req, res) => {
   res.json({ message: 'Settings updated' });
 });
 
-router.post('/settings/test-slack', async (req, res) => {
-  try {
-    await sendTestMessage();
-    res.json({ message: 'Test message sent' });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
+// --- Run-everything (all clients) — kept for the global scheduler ---
+
+router.post('/check/run', async (req, res) => {
+  if (isRunning()) return res.status(409).json({ error: 'Check cycle already running' });
+  res.json({ message: 'Check cycle started' });
+  runAllChecks().catch(e => console.error('Manual check failed:', e.message));
 });
 
-// --- Status ---
-
 router.get('/status', (req, res) => {
+  // Global status across all clients.
   const sites = db.getAllSites();
   const latestResults = db.getLatestResultsForAllSites();
 
-  // Build a set of enabled check types per site
   const enabledChecks = {};
   for (const site of sites) {
-    enabledChecks[site.id] = new Set(
-      (site.checks || []).filter(c => c.enabled).map(c => c.checker_type)
-    );
+    enabledChecks[site.id] = new Set((site.checks || []).filter(c => c.enabled).map(c => c.checker_type));
   }
 
   const passing = new Set();
   const failing = new Set();
-
   for (const r of latestResults) {
-    // Only count results for checks that are currently enabled on the site
     const siteChecks = enabledChecks[r.site_id];
     if (!siteChecks || !siteChecks.has(r.check_type)) continue;
-
     if (r.status === 'pass') passing.add(r.site_id);
     else failing.add(r.site_id);
   }
 
-  // A site is "failing" if ANY of its enabled checks fail
-  const failingSites = [...failing].filter(id => failing.has(id));
-  const passingSites = [...passing].filter(id => !failing.has(id));
-
   res.json({
     totalSites: sites.length,
     enabledSites: sites.filter(s => s.enabled).length,
-    passing: passingSites.length,
-    failing: failingSites.length,
+    passing: [...passing].filter(id => !failing.has(id)).length,
+    failing: failing.size,
     isRunning: isRunning(),
     checkerTypes: CHECKER_LABELS,
   });

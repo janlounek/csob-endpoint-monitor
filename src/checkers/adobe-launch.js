@@ -1,14 +1,15 @@
 /**
  * Adobe Launch / Adobe Experience Platform Tags checker
- * Supports: Legacy DTM, Adobe Launch, Adobe Web SDK via Launch
- * Endpoints: assets.adobedtm.com, statistics.csob.cz, launch-* scripts
+ * Supports: Legacy DTM, Adobe Launch, Adobe Web SDK via Launch.
+ * Built-in endpoints: assets.adobedtm.com, adoberesources.net, launch-* scripts.
+ * Optional config.customDomain: extra custom domain to validate (e.g. tags.example.com).
  */
 module.exports = async function checkAdobeLaunch(page, interceptor, config) {
-  const customDomain = config.customDomain || 'statistics.csob.cz';
+  const customDomain = (config && config.customDomain) ? String(config.customDomain).trim() : '';
 
   const findings = {
     endpoints: { adobedtm: false, customDomain: false },
-    customDomainName: customDomain,
+    customDomainName: customDomain || '(not configured)',
     scriptFound: false,
     satelliteExists: false,
     launchScriptUrl: null,
@@ -22,7 +23,7 @@ module.exports = async function checkAdobeLaunch(page, interceptor, config) {
     for (var i = 0; i < scripts.length; i++) {
       var src = scripts[i].src;
       if (src.includes('assets.adobedtm.com') ||
-          src.includes(domain) ||
+          (domain && src.includes(domain)) ||
           src.includes('launch-') ||
           src.includes('adobetags') ||
           src.includes('adoberesources.net')) return true;
@@ -30,12 +31,11 @@ module.exports = async function checkAdobeLaunch(page, interceptor, config) {
     return false;
   }, customDomain).catch(() => false);
 
-  // Try to find the actual launch script URL for debugging
   findings.launchScriptUrl = await page.evaluate(function(domain) {
     var scripts = document.querySelectorAll('script[src]');
     for (var i = 0; i < scripts.length; i++) {
       var src = scripts[i].src;
-      if (src.includes('assets.adobedtm.com') || src.includes(domain) || src.includes('launch-')) {
+      if (src.includes('assets.adobedtm.com') || (domain && src.includes(domain)) || src.includes('launch-')) {
         return src;
       }
     }
@@ -52,10 +52,12 @@ module.exports = async function checkAdobeLaunch(page, interceptor, config) {
   findings.endpoints.adobedtm = adobeRequests.length > 0;
   if (adobeRequests.length > 0) findings.networkRequests.push('assets.adobedtm.com: ' + adobeRequests.length + ' request(s)');
 
-  var escapedDomain = customDomain.replace(/\./g, '\\.');
-  var customRequests = interceptor.getRequestsMatching(new RegExp(escapedDomain));
-  findings.endpoints.customDomain = customRequests.length > 0;
-  if (customRequests.length > 0) findings.networkRequests.push(customDomain + ': ' + customRequests.length + ' request(s)');
+  if (customDomain) {
+    var escapedDomain = customDomain.replace(/\./g, '\\.');
+    var customRequests = interceptor.getRequestsMatching(new RegExp(escapedDomain));
+    findings.endpoints.customDomain = customRequests.length > 0;
+    if (customRequests.length > 0) findings.networkRequests.push(customDomain + ': ' + customRequests.length + ' request(s)');
+  }
 
   // Also check for launch-* scripts in network
   var launchRequests = interceptor.getRequestsMatching(/launch-[a-zA-Z0-9]+/);
@@ -77,7 +79,7 @@ module.exports = async function checkAdobeLaunch(page, interceptor, config) {
     findings.reasons.push('No Adobe Launch/Tags script found in DOM');
     findings.reasons.push('_satellite object not found');
     findings.reasons.push('No requests to assets.adobedtm.com');
-    findings.reasons.push('No requests to ' + customDomain);
+    if (customDomain) findings.reasons.push('No requests to ' + customDomain);
   }
 
   return { status: anyFound ? 'pass' : 'fail', details: findings };

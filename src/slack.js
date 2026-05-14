@@ -1,5 +1,3 @@
-const { getSetting } = require('../db/database');
-
 function getFailReason(failure) {
   var reasons = failure.details && Array.isArray(failure.details.reasons) ? failure.details.reasons : [];
   var failReasons = reasons.filter(function(r) { return !r.startsWith('OK:'); });
@@ -8,26 +6,24 @@ function getFailReason(failure) {
   return 'Check did not pass';
 }
 
-async function sendNotification(failures) {
-  const webhookUrl = getSetting('slack_webhook_url');
+async function sendNotification(failures, webhookUrl, clientName) {
   if (!webhookUrl) {
-    console.log('  Slack: No webhook configured, skipping notification.');
+    console.log(`  Slack: No webhook configured${clientName ? ' for ' + clientName : ''}, skipping notification.`);
     return;
   }
 
-  console.log(`  Slack: Sending notification for ${failures.length} failure(s)...`);
+  const clientLabel = clientName ? ` [${clientName}]` : '';
+  console.log(`  Slack${clientLabel}: Sending notification for ${failures.length} failure(s)...`);
 
-  // Build exactly 1 message
   const blocks = [];
 
   if (failures.length === 1) {
-    // Single failure — detailed message
     const f = failures[0];
     const reason = getFailReason(f);
     blocks.push(
       {
         type: 'header',
-        text: { type: 'plain_text', text: ':warning: Endpoint Check Failed', emoji: true },
+        text: { type: 'plain_text', text: ':warning: Endpoint Check Failed' + (clientName ? ` — ${clientName}` : ''), emoji: true },
       },
       {
         type: 'section',
@@ -38,7 +34,6 @@ async function sendNotification(failures) {
       }
     );
   } else {
-    // Multiple failures — compact summary
     const bySite = {};
     for (const f of failures) {
       if (!bySite[f.siteName]) bySite[f.siteName] = { url: f.siteUrl, checks: [] };
@@ -49,7 +44,7 @@ async function sendNotification(failures) {
     blocks.push(
       {
         type: 'header',
-        text: { type: 'plain_text', text: ':warning: Multiple Endpoint Checks Failed', emoji: true },
+        text: { type: 'plain_text', text: ':warning: Multiple Endpoint Checks Failed' + (clientName ? ` — ${clientName}` : ''), emoji: true },
       },
       {
         type: 'section',
@@ -61,7 +56,6 @@ async function sendNotification(failures) {
       { type: 'divider' }
     );
 
-    // Compact: max 10 sites in the message to stay under Slack block limits
     const siteEntries = Object.entries(bySite).slice(0, 10);
     for (const [siteName, data] of siteEntries) {
       const checkList = data.checks
@@ -100,7 +94,7 @@ async function sendNotification(failures) {
 
   try {
     const body = JSON.stringify({ blocks });
-    console.log(`  Slack: Sending ${blocks.length} blocks (${body.length} bytes)...`);
+    console.log(`  Slack${clientLabel}: Sending ${blocks.length} blocks (${body.length} bytes)...`);
 
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -110,17 +104,16 @@ async function sendNotification(failures) {
 
     const responseText = await response.text();
     if (!response.ok) {
-      console.error(`  Slack webhook failed: ${response.status} ${responseText}`);
+      console.error(`  Slack${clientLabel} webhook failed: ${response.status} ${responseText}`);
     } else {
-      console.log(`  Slack: Notification sent successfully (${responseText})`);
+      console.log(`  Slack${clientLabel}: Notification sent successfully (${responseText})`);
     }
   } catch (e) {
-    console.error('  Slack notification error:', e.message);
+    console.error(`  Slack${clientLabel} notification error:`, e.message);
   }
 }
 
-async function sendTestMessage() {
-  const webhookUrl = getSetting('slack_webhook_url');
+async function sendTestMessage(webhookUrl, clientName) {
   if (!webhookUrl) throw new Error('No Slack webhook URL configured');
 
   const response = await fetch(webhookUrl, {
@@ -130,7 +123,10 @@ async function sendTestMessage() {
       blocks: [
         {
           type: 'section',
-          text: { type: 'mrkdwn', text: ':white_check_mark: *Marketing Monitor* — Test notification. Connection successful!' },
+          text: {
+            type: 'mrkdwn',
+            text: `:white_check_mark: *Endpoint Monitor*${clientName ? ` — ${clientName}` : ''} — Test notification. Connection successful!`,
+          },
         },
       ],
     }),

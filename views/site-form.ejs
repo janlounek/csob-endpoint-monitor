@@ -1,3 +1,4 @@
+<% var client = (typeof currentClient !== 'undefined') ? currentClient : null; %>
 <%- include('header') %>
 
 <%
@@ -5,6 +6,7 @@
   var siteName = site ? site.name : '';
   var siteUrl = site ? site.url : '';
   var siteId = site ? site.id : null;
+  var clientSlug = client ? client.slug : '';
 
   function isChecked(type) {
     if (!site) return false;
@@ -58,17 +60,17 @@
               <% } else if (type === 'adform') { %>
                 <small class="help-text">Checks: s2.adform.net, track.adform.net</small>
               <% } else if (type === 'adobe_analytics') { %>
-                <input type="text" name="config_<%= type %>_trackingDomain" placeholder="Tracking domain (default: tracking-secure.csob.cz)" value="<%= getConfigVal(type, 'trackingDomain') %>">
-                <input type="text" name="config_<%= type %>_reportingSuite" placeholder="Reporting Suite ID (e.g. kbcnvcsobczprod)" value="<%= getConfigVal(type, 'reportingSuite') %>">
+                <input type="text" name="config_<%= type %>_trackingDomain" placeholder="Custom tracking domain (optional, e.g. analytics.example.com)" value="<%= getConfigVal(type, 'trackingDomain') %>">
+                <input type="text" name="config_<%= type %>_reportingSuite" placeholder="Reporting Suite ID (optional)" value="<%= getConfigVal(type, 'reportingSuite') %>">
               <% } else if (type === 'adobe_launch') { %>
-                <input type="text" name="config_<%= type %>_customDomain" placeholder="Custom domain (default: statistics.csob.cz)" value="<%= getConfigVal(type, 'customDomain') %>">
+                <input type="text" name="config_<%= type %>_customDomain" placeholder="Custom Launch domain (optional, e.g. tags.example.com)" value="<%= getConfigVal(type, 'customDomain') %>">
               <% } else if (type === 'onetrust') { %>
                 <input type="text" name="config_<%= type %>_endpoint" placeholder="Endpoint host (default: cdn.cookielaw.org)" value="<%= getConfigVal(type, 'endpoint') %>">
                 <small class="help-text">Override for self-hosted/CDN OneTrust deployments. Leave blank to use the default.</small>
               <% } else if (type === 'sklik') { %>
                 <small class="help-text">Checks: c.seznam.cz, h.seznam.cz</small>
               <% } else if (type === 'exponea') { %>
-                <input type="text" name="config_<%= type %>_apiDomain" placeholder="API domain (default: data-api.csob.cz)" value="<%= getConfigVal(type, 'apiDomain') %>">
+                <input type="text" name="config_<%= type %>_apiDomain" placeholder="Custom Exponea API domain (optional, e.g. data-api.example.com)" value="<%= getConfigVal(type, 'apiDomain') %>">
               <% } else if (type === 'custom') { %>
                 <input type="text" name="config_<%= type %>_scriptUrl" placeholder="Script URL to check" value="<%= getConfigVal(type, 'scriptUrl') %>">
                 <input type="text" name="config_<%= type %>_globalVar" placeholder="Global variable to check (e.g. myLib)" value="<%= getConfigVal(type, 'globalVar') %>">
@@ -81,7 +83,7 @@
     </div>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary"><%= isEdit ? 'Update' : 'Create' %> Site</button>
-      <a href="<%= isEdit ? '/sites/' + siteId : '/' %>" class="btn btn-secondary">Cancel</a>
+      <a href="<%= isEdit ? '/c/' + clientSlug + '/sites/' + siteId : '/c/' + clientSlug %>" class="btn btn-secondary">Cancel</a>
     </div>
   </form>
 </div>
@@ -89,6 +91,7 @@
 <script>
   var EDIT_MODE = <%= isEdit ? 'true' : 'false' %>;
   var SITE_ID = <%= siteId ? siteId : 'null' %>;
+  var CLIENT_SLUG = <%- JSON.stringify(clientSlug) %>;
 </script>
 
 <%- include('footer') %>

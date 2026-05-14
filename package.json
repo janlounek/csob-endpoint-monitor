@@ -1,7 +1,7 @@
 {
-  "name": "marketing-monitor",
+  "name": "etnetera-activate-endpoint-monitor",
   "version": "1.0.0",
-  "description": "Monitor marketing endpoints (GA, GTM, Meta Pixel, TikTok, Segment) across websites",
+  "description": "Multi-client marketing/analytics endpoint monitor — checks GA, GTM, Meta Pixel, TikTok, Adobe, OneTrust, Exponea and more across websites.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

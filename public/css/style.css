@@ -521,3 +521,94 @@ body {
   .site-header { flex-direction: column; }
   .sites-table th:nth-child(2), .sites-table td:nth-child(2) { display: none; }
 }
+
+/* Landing page — clients list */
+.landing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.landing-header h1 { font-size: 24px; }
+
+.clients-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.client-card {
+  display: block;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-decoration: none;
+  color: var(--text);
+  transition: all 0.15s;
+}
+.client-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+.client-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.client-card-head h3 { font-size: 17px; font-weight: 600; }
+.client-card-meta {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.client-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.client-card-footer .slug {
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.text-pass { color: var(--success); }
+.text-fail { color: var(--danger); }
+.muted { color: var(--text-muted); }
+.subtle { color: var(--text-muted); font-size: 13px; }
+
+.badge-warn {
+  display: inline-block;
+  background: rgba(240,180,41,0.15);
+  color: var(--warning);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.status-dot.pass { background: var(--success); }
+.status-dot.fail { background: var(--danger); }
+.status-dot.unknown { background: var(--text-muted); }
+
+/* Dashboard header (per-client) */
+.dashboard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.dashboard-header h1 { font-size: 22px; margin-bottom: 2px; }
+
+.breadcrumb {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.breadcrumb a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.breadcrumb a:hover { color: var(--text); }
+

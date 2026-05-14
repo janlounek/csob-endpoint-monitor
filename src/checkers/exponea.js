@@ -1,12 +1,13 @@
 /**
  * Exponea (Bloomreach) checker
- * Endpoint: data-api.csob.cz
+ * Built-in endpoints: cdn.exponea.com, api.exponea.com, exponea/bloomreach script names.
+ * Optional config.apiDomain: extra custom API domain to validate (e.g. data-api.example.com).
  */
 module.exports = async function checkExponea(page, interceptor, config) {
-  const apiDomain = config.apiDomain || 'data-api.csob.cz';
+  const apiDomain = (config && config.apiDomain) ? String(config.apiDomain).trim() : '';
 
   const findings = {
-    apiDomain,
+    apiDomain: apiDomain || '(not configured)',
     scriptFound: false,
     exponeaExists: false,
     networkRequests: 0,
@@ -17,7 +18,7 @@ module.exports = async function checkExponea(page, interceptor, config) {
   findings.scriptFound = await page.evaluate((domain) => {
     return !!document.querySelector('script[src*="exponea"]') ||
            !!document.querySelector('script[src*="bloomreach"]') ||
-           !!document.querySelector(`script[src*="${domain}"]`) ||
+           (domain && !!document.querySelector(`script[src*="${domain}"]`)) ||
            !!document.querySelector('script[src*="cdn.exponea.com"]');
   }, apiDomain).catch(() => false);
 
@@ -37,9 +38,12 @@ module.exports = async function checkExponea(page, interceptor, config) {
            (typeof window.engagement === 'object');
   }).catch(() => false);
 
-  const escapedDomain = apiDomain.replace(/\./g, '\\.');
-  const apiRequests = interceptor.getRequestsMatching(new RegExp(escapedDomain));
-  findings.networkRequests = apiRequests.length;
+  let apiRequests = [];
+  if (apiDomain) {
+    const escapedDomain = apiDomain.replace(/\./g, '\\.');
+    apiRequests = interceptor.getRequestsMatching(new RegExp(escapedDomain));
+    findings.networkRequests = apiRequests.length;
+  }
 
   const cdnRequests = interceptor.getRequestsMatching(/cdn\.exponea\.com|api\.exponea\.com/);
   if (cdnRequests.length > 0) findings.networkRequests += cdnRequests.length;
@@ -53,7 +57,7 @@ module.exports = async function checkExponea(page, interceptor, config) {
 
   if (!findings.scriptFound) findings.reasons.push('No Exponea/Bloomreach script found in DOM');
   if (!findings.exponeaExists) findings.reasons.push('Exponea JS object not found (window.exponea)');
-  if (apiRequests.length === 0) findings.reasons.push(`No requests to ${apiDomain}`);
+  if (apiDomain && apiRequests.length === 0) findings.reasons.push(`No requests to ${apiDomain}`);
   if (cdnRequests.length === 0) findings.reasons.push('No requests to cdn.exponea.com');
 
   if (anyFound) {

@@ -1,5 +1,5 @@
 const { checkSite, launchBrowser, closeBrowser } = require('../browser/launcher');
-const { saveResult, getAllSites, getPreviousStatus } = require('../../db/database');
+const { saveResult, getAllSites, getSiteById, getClientById } = require('../../db/database');
 const { sendNotification } = require('../slack');
 
 const CHECKERS = {
@@ -40,17 +40,14 @@ async function runChecksForSite(site) {
   const checks = site.checks.filter(c => c.enabled);
   if (checks.length === 0) return [];
 
-  // Retry once on complete failure
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const results = await checkSite(site, checks, CHECKERS);
 
-      // Save results to DB
       for (const result of results) {
         saveResult(site.id, result.checkType, result.status, result.details);
       }
 
-      // Check if all errored (page-level failure) — retry
       const allErrored = results.every(r => r.status === 'error');
       if (allErrored && attempt === 0) {
         console.log(`All checks errored for ${site.name}, retrying...`);
@@ -63,7 +60,6 @@ async function runChecksForSite(site) {
         console.log(`Check failed for ${site.name}: ${e.message}, retrying...`);
         continue;
       }
-      // Second attempt failed — save error results
       const errorResults = checks.map(c => ({
         checkType: c.checker_type,
         status: 'error',
@@ -77,16 +73,51 @@ async function runChecksForSite(site) {
   }
 }
 
-async function runAllChecks() {
+function buildFailures(site, results) {
+  return results
+    .filter(r => r.status === 'fail' || r.status === 'error')
+    .map(r => ({
+      siteName: site.name,
+      siteUrl: site.url,
+      clientId: site.client_id,
+      checkType: r.checkType,
+      checkLabel: CHECKER_LABELS[r.checkType] || r.checkType,
+      status: r.status,
+      details: r.details,
+    }));
+}
+
+async function notifyFailuresByClient(failures) {
+  // Group failures by client_id and send one Slack message per client
+  // (each client may have a different webhook configured).
+  const byClient = {};
+  for (const f of failures) {
+    const key = f.clientId || 'none';
+    if (!byClient[key]) byClient[key] = [];
+    byClient[key].push(f);
+  }
+
+  for (const [clientIdStr, clientFailures] of Object.entries(byClient)) {
+    if (clientIdStr === 'none') {
+      console.log(`  Skipping Slack: ${clientFailures.length} failure(s) belong to sites without a client.`);
+      continue;
+    }
+    const client = getClientById(parseInt(clientIdStr));
+    if (!client) continue;
+    await sendNotification(clientFailures, client.slack_webhook_url, client.name);
+  }
+}
+
+async function runAllChecks(filterClientId = null) {
   if (running) {
     console.log('Check cycle already in progress, skipping.');
     return { skipped: true };
   }
 
   running = true;
-  console.log(`[${new Date().toISOString()}] Starting check cycle...`);
+  console.log(`[${new Date().toISOString()}] Starting check cycle${filterClientId ? ' for client ' + filterClientId : ''}...`);
 
-  const sites = getAllSites().filter(s => s.enabled);
+  const sites = getAllSites(filterClientId).filter(s => s.enabled);
   const failures = [];
 
   try {
@@ -95,28 +126,15 @@ async function runAllChecks() {
     for (const site of sites) {
       console.log(`  Checking ${site.name} (${site.url})...`);
       const results = await runChecksForSite(site);
-
-      for (const result of results) {
-        if (result.status === 'fail' || result.status === 'error') {
-          failures.push({
-            siteName: site.name,
-            siteUrl: site.url,
-            checkType: result.checkType,
-            checkLabel: CHECKER_LABELS[result.checkType] || result.checkType,
-            status: result.status,
-            details: result.details,
-          });
-        }
-      }
+      failures.push(...buildFailures(site, results));
     }
 
-    // Send max 1 Slack message per scan cycle
     if (failures.length > 0) {
-      console.log(`  ${failures.length} failure(s) detected across all sites:`);
+      console.log(`  ${failures.length} failure(s) detected:`);
       for (const f of failures) {
         console.log(`    - ${f.siteName}: ${f.checkLabel} (${f.status})`);
       }
-      await sendNotification(failures);
+      await notifyFailuresByClient(failures);
     } else {
       console.log('  All checks passed, no Slack notification needed.');
     }
@@ -138,7 +156,6 @@ async function runSingleSiteCheck(siteId) {
     return [];
   }
   running = true;
-  const { getSiteById } = require('../../db/database');
   const site = getSiteById(siteId);
   if (!site) { running = false; throw new Error('Site not found'); }
 
@@ -147,21 +164,10 @@ async function runSingleSiteCheck(siteId) {
     await launchBrowser();
     const results = await runChecksForSite(site);
 
-    // Send Slack notification for failures
-    const failures = results
-      .filter(r => r.status === 'fail' || r.status === 'error')
-      .map(r => ({
-        siteName: site.name,
-        siteUrl: site.url,
-        checkType: r.checkType,
-        checkLabel: CHECKER_LABELS[r.checkType] || r.checkType,
-        status: r.status,
-        details: r.details,
-      }));
-
+    const failures = buildFailures(site, results);
     if (failures.length > 0) {
       console.log(`  ${failures.length} failure(s) for ${site.name}, sending Slack notification...`);
-      await sendNotification(failures);
+      await notifyFailuresByClient(failures);
     }
 
     return results;
