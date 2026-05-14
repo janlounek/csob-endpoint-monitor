@@ -63,7 +63,8 @@
               <% } else if (type === 'adobe_launch') { %>
                 <input type="text" name="config_<%= type %>_customDomain" placeholder="Custom domain (default: statistics.csob.cz)" value="<%= getConfigVal(type, 'customDomain') %>">
               <% } else if (type === 'onetrust') { %>
-                <small class="help-text">Checks: cdn.cookielaw.org</small>
+                <input type="text" name="config_<%= type %>_endpoint" placeholder="Endpoint host (default: cdn.cookielaw.org)" value="<%= getConfigVal(type, 'endpoint') %>">
+                <small class="help-text">Override for self-hosted/CDN OneTrust deployments. Leave blank to use the default.</small>
               <% } else if (type === 'sklik') { %>
                 <small class="help-text">Checks: c.seznam.cz, h.seznam.cz</small>
               <% } else if (type === 'exponea') { %>
