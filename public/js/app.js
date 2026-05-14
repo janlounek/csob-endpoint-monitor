@@ -52,6 +52,17 @@ function formatReasons(details) {
   }).join('');
 }
 
+// For 'custom' checks, prefer the user-supplied name (stored either in the site_check
+// config or in the check result details) over the generic 'Custom' label.
+function checkLabel(checkType, configOrDetails) {
+  var base = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[checkType]) || checkType;
+  if (checkType !== 'custom') return base;
+  var cfg = configOrDetails;
+  if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch (e) { cfg = null; } }
+  if (cfg && cfg.name && String(cfg.name).trim()) return String(cfg.name);
+  return base;
+}
+
 function currentClientSlug() {
   return (typeof CLIENT_SLUG !== 'undefined' && CLIENT_SLUG) ? CLIENT_SLUG : null;
 }
@@ -205,8 +216,8 @@ function renderSiteChecks(site) {
   }).map(function(c) {
     var result = site.latestResults[c.checker_type];
     var st = result ? result.status : 'unknown';
-    var label = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[c.checker_type]) || c.checker_type;
-    return '<span class="check-badge ' + st + '" title="' + label + ': ' + st.toUpperCase() + '"><span class="status-dot ' + st + '"></span>' + label + '</span>';
+    var label = checkLabel(c.checker_type, c.config);
+    return '<span class="check-badge ' + st + '" title="' + escapeHtml(label) + ': ' + st.toUpperCase() + '"><span class="status-dot ' + st + '"></span>' + escapeHtml(label) + '</span>';
   }).join('');
 }
 
@@ -326,10 +337,10 @@ async function loadSiteDetail(siteId) {
     var cardsEl = document.getElementById('status-cards');
     if (site.latestResults && site.latestResults.length > 0) {
       cardsEl.innerHTML = site.latestResults.map(function(r) {
-        var label = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[r.check_type]) || r.check_type;
+        var label = checkLabel(r.check_type, r.details);
         var reasons = formatReasons(r.details, r.status);
         return '<div class="status-card ' + r.status + '">' +
-          '<h3><span class="status-dot ' + r.status + '"></span> ' + label + '</h3>' +
+          '<h3><span class="status-dot ' + r.status + '"></span> ' + escapeHtml(label) + '</h3>' +
           '<div class="status-text">' + r.status.toUpperCase() + ' &mdash; ' + timeAgo(r.checked_at) + '</div>' +
           (reasons ? '<div class="check-reasons">' + reasons + '</div>' : '') +
           '<button class="details-toggle" onclick="this.nextElementSibling.classList.toggle(\'visible\')">Raw JSON</button>' +
@@ -350,13 +361,13 @@ async function loadSiteDetail(siteId) {
 function renderResults(results, append) {
   var tbody = document.getElementById('results-tbody');
   var html = results.map(function(r) {
-    var label = (typeof CHECKER_LABELS !== 'undefined' && CHECKER_LABELS[r.check_type]) || r.check_type;
+    var label = checkLabel(r.check_type, r.details);
     var time = new Date(r.checked_at + 'Z').toLocaleString();
     var reasons = getReasons(r.details);
     var reasonText = reasons.length > 0 ? reasons.join(' | ') : '';
     return '<tr class="result-row ' + r.status + '">' +
       '<td>' + time + '</td>' +
-      '<td>' + label + '</td>' +
+      '<td>' + escapeHtml(label) + '</td>' +
       '<td><span class="status-badge ' + r.status + '">' + r.status.toUpperCase() + '</span></td>' +
       '<td>' +
         '<div class="reason-summary">' + escapeHtml(reasonText) + '</div>' +
@@ -445,11 +456,42 @@ async function saveSite(event) {
 
 // --- Global settings ---
 
+function onCronPresetChange() {
+  var preset = document.getElementById('cron_preset');
+  var input = document.getElementById('cron_schedule');
+  var customRow = document.getElementById('cron-custom-row');
+  if (!preset || !input) return;
+
+  if (preset.value === '__custom__') {
+    customRow.style.display = '';
+    input.focus();
+  } else {
+    input.value = preset.value;
+    customRow.style.display = 'none';
+  }
+}
+
+function syncCronPreset(cronValue) {
+  var preset = document.getElementById('cron_preset');
+  var customRow = document.getElementById('cron-custom-row');
+  if (!preset) return;
+  var match = Array.prototype.slice.call(preset.options).find(function(o) { return o.value === cronValue; });
+  if (match) {
+    preset.value = match.value;
+    if (customRow) customRow.style.display = 'none';
+  } else {
+    preset.value = '__custom__';
+    if (customRow) customRow.style.display = '';
+  }
+}
+
 async function loadSettings() {
   try {
     var settings = await api('/settings');
+    var cron = settings.cron_schedule || '0 */4 * * *';
     var cronInput = document.getElementById('cron_schedule');
-    if (cronInput) cronInput.value = settings.cron_schedule || '0 */4 * * *';
+    if (cronInput) cronInput.value = cron;
+    syncCronPreset(cron);
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -458,8 +500,11 @@ async function loadSettings() {
 async function saveSettings(event) {
   event.preventDefault();
   try {
-    var cron_schedule = document.getElementById('cron_schedule').value;
+    var preset = document.getElementById('cron_preset');
+    var input = document.getElementById('cron_schedule');
+    var cron_schedule = (preset && preset.value !== '__custom__') ? preset.value : input.value;
     await api('/settings', { method: 'PUT', body: JSON.stringify({ cron_schedule: cron_schedule }) });
+    if (input) input.value = cron_schedule;
     toast('Settings saved');
   } catch (e) {
     toast(e.message, 'error');

@@ -6,7 +6,13 @@ let db;
 
 function getDb() {
   if (!db) {
-    db = new Database(path.join(__dirname, '..', 'marketing-monitor.db'));
+    // DB_PATH lets the DB live on a Railway volume (or other mount) so it
+    // survives redeploys. Falls back to the project root for local dev.
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'marketing-monitor.db');
+    const dir = path.dirname(dbPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    console.log(`SQLite DB: ${dbPath}`);
+    db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
 

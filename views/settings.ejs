@@ -5,9 +5,27 @@
 
   <form id="settings-form" onsubmit="saveSettings(event)">
     <div class="form-group">
-      <label for="cron_schedule">Check schedule (cron expression)</label>
+      <label for="cron_preset">How often should sites be scanned?</label>
+      <select id="cron_preset" onchange="onCronPresetChange()">
+        <option value="*/5 * * * *">Every 5 minutes</option>
+        <option value="*/15 * * * *">Every 15 minutes</option>
+        <option value="*/30 * * * *">Every 30 minutes</option>
+        <option value="0 * * * *">Every hour</option>
+        <option value="0 */2 * * *">Every 2 hours</option>
+        <option value="0 */4 * * *" selected>Every 4 hours (default)</option>
+        <option value="0 */6 * * *">Every 6 hours</option>
+        <option value="0 */12 * * *">Every 12 hours</option>
+        <option value="0 0 * * *">Daily at midnight (UTC)</option>
+        <option value="0 6 * * *">Daily at 06:00 (UTC)</option>
+        <option value="__custom__">Custom cron expression…</option>
+      </select>
+      <small class="help-text">Pick a preset or "Custom" to write your own cron expression.</small>
+    </div>
+
+    <div class="form-group" id="cron-custom-row">
+      <label for="cron_schedule">Cron expression</label>
       <input type="text" id="cron_schedule" name="cron_schedule" placeholder="0 */4 * * *">
-      <small class="help-text">Default: <code>0 */4 * * *</code> (every 4 hours). The scheduler checks all sites across all clients on this schedule. Slack webhooks are configured per client.</small>
+      <small class="help-text">Format: <code>min hour day month weekday</code>. All times are UTC.</small>
     </div>
 
     <div class="form-actions">

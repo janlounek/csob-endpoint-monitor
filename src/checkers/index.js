@@ -73,6 +73,14 @@ async function runChecksForSite(site) {
   }
 }
 
+function labelFor(checkType, details) {
+  // Custom checks carry the user-supplied name in details.name (set by the custom checker).
+  if (checkType === 'custom' && details && details.name && String(details.name).trim()) {
+    return String(details.name);
+  }
+  return CHECKER_LABELS[checkType] || checkType;
+}
+
 function buildFailures(site, results) {
   return results
     .filter(r => r.status === 'fail' || r.status === 'error')
@@ -81,7 +89,7 @@ function buildFailures(site, results) {
       siteUrl: site.url,
       clientId: site.client_id,
       checkType: r.checkType,
-      checkLabel: CHECKER_LABELS[r.checkType] || r.checkType,
+      checkLabel: labelFor(r.checkType, r.details),
       status: r.status,
       details: r.details,
     }));
