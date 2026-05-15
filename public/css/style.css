@@ -612,3 +612,18 @@ body {
 }
 .breadcrumb a:hover { color: var(--text); }
 
+.form-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px 4px;
+  margin: 24px 0 16px;
+}
+.form-fieldset legend {
+  padding: 0 8px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.form-fieldset .help-text { display: block; margin-bottom: 12px; }
+
+

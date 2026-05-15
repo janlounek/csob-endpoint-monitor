@@ -142,10 +142,21 @@ async function saveClient(event) {
   event.preventDefault();
   var form = event.target;
   var body = {
-    name: form.querySelector('#name').value,
-    slug: form.querySelector('#slug').value,
     slack_webhook_url: form.querySelector('#slack_webhook_url').value,
   };
+  // Admin-only fields are absent (or disabled) when a client edits themselves.
+  // Only include fields that have an editable input on the page.
+  var nameEl = form.querySelector('#name');
+  if (nameEl && !nameEl.disabled) body.name = nameEl.value;
+  var slugEl = form.querySelector('#slug');
+  if (slugEl && !slugEl.disabled) body.slug = slugEl.value;
+  var usernameEl = form.querySelector('#username');
+  if (usernameEl && !usernameEl.disabled) body.username = usernameEl.value;
+  var passwordEl = form.querySelector('#password');
+  if (passwordEl && passwordEl.value) body.password = passwordEl.value;
+  var clearEl = form.querySelector('#clear_password');
+  if (clearEl && clearEl.checked) body.clearPassword = true;
+
   try {
     if (typeof EDIT_MODE !== 'undefined' && EDIT_MODE) {
       var resp = await api('/clients/' + CLIENT_SLUG, { method: 'PUT', body: JSON.stringify(body) });

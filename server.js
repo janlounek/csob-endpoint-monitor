@@ -16,9 +16,11 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Basic auth runs before static + routes; no-op unless ADMIN_USER/ADMIN_PASS set.
-app.use(basicAuth);
+// Static assets (CSS/JS) are served openly so the browser doesn't get a second
+// auth prompt for the realm of each asset. Routes below the auth middleware are
+// guarded — see src/middleware/basic-auth.js.
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(basicAuth);
 
 app.use('/api', apiRoutes);
 app.use('/', dashboardRoutes);

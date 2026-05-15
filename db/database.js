@@ -1,8 +1,32 @@
 const Database = require('better-sqlite3');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
 let db;
+
+// --- Password hashing (scrypt, no external deps) ---
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(password), salt, 64);
+  return 'scrypt$' + salt.toString('hex') + '$' + hash.toString('hex');
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.startsWith('scrypt$')) return false;
+  const parts = stored.split('$');
+  if (parts.length !== 3) return false;
+  try {
+    const salt = Buffer.from(parts[1], 'hex');
+    const expected = Buffer.from(parts[2], 'hex');
+    const actual = crypto.scryptSync(String(password), salt, expected.length);
+    if (actual.length !== expected.length) return false;
+    return crypto.timingSafeEqual(actual, expected);
+  } catch (e) {
+    return false;
+  }
+}
 
 function getDb() {
   if (!db) {
@@ -29,6 +53,14 @@ function getDb() {
     }
     if (!siteCols.includes('client_id')) {
       db.exec('ALTER TABLE sites ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE');
+    }
+
+    const clientCols = db.prepare("PRAGMA table_info(clients)").all().map(c => c.name);
+    if (!clientCols.includes('username')) {
+      db.exec('ALTER TABLE clients ADD COLUMN username TEXT');
+    }
+    if (!clientCols.includes('password_hash')) {
+      db.exec('ALTER TABLE clients ADD COLUMN password_hash TEXT');
     }
 
     // Backfill: if there are sites without a client_id, create a default CSOB client
@@ -80,20 +112,32 @@ function getClientById(id) {
   return getDb().prepare('SELECT * FROM clients WHERE id = ?').get(id);
 }
 
-function createClient({ name, slug, slack_webhook_url = null }) {
+function getClientByUsername(username) {
+  if (!username) return null;
+  return getDb().prepare('SELECT * FROM clients WHERE username = ?').get(String(username));
+}
+
+function createClient({ name, slug, slack_webhook_url = null, username = null, password = null }) {
+  const password_hash = password ? hashPassword(password) : null;
   const r = getDb().prepare(
-    'INSERT INTO clients (name, slug, slack_webhook_url) VALUES (?, ?, ?)'
-  ).run(name, slug, slack_webhook_url);
+    'INSERT INTO clients (name, slug, slack_webhook_url, username, password_hash) VALUES (?, ?, ?, ?, ?)'
+  ).run(name, slug, slack_webhook_url, username || null, password_hash);
   return r.lastInsertRowid;
 }
 
-function updateClient(id, { name, slug, slack_webhook_url }) {
+function updateClient(id, { name, slug, slack_webhook_url, username, password, clearPassword }) {
   const d = getDb();
   const fields = [];
   const values = [];
   if (name !== undefined) { fields.push('name = ?'); values.push(name); }
   if (slug !== undefined) { fields.push('slug = ?'); values.push(slug); }
   if (slack_webhook_url !== undefined) { fields.push('slack_webhook_url = ?'); values.push(slack_webhook_url || null); }
+  if (username !== undefined) { fields.push('username = ?'); values.push(username || null); }
+  if (clearPassword) {
+    fields.push('password_hash = ?'); values.push(null);
+  } else if (password) {
+    fields.push('password_hash = ?'); values.push(hashPassword(password));
+  }
   if (fields.length === 0) return;
   fields.push("updated_at = datetime('now')");
   values.push(id);
@@ -243,9 +287,12 @@ function getAllSettings() {
 module.exports = {
   initDb,
   getDb,
+  hashPassword,
+  verifyPassword,
   getAllClients,
   getClientBySlug,
   getClientById,
+  getClientByUsername,
   createClient,
   updateClient,
   deleteClient,

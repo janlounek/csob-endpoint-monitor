@@ -6,6 +6,10 @@
   var name = client ? client.name : '';
   var slug = client ? client.slug : '';
   var webhook = client ? (client.slack_webhook_url || '') : '';
+  var username = client ? (client.username || '') : '';
+  var hasPassword = !!(client && client.password_hash);
+  var _ctxForForm = (typeof authContext !== 'undefined') ? authContext : 'admin';
+  var _isClient = _ctxForForm === 'client';
 %>
 
 <div class="form-page">
@@ -13,11 +17,11 @@
   <form id="client-form" onsubmit="saveClient(event)">
     <div class="form-group">
       <label for="name">Client name</label>
-      <input type="text" id="name" name="name" required placeholder="e.g. Acme Corp" value="<%= name %>">
+      <input type="text" id="name" name="name" required placeholder="e.g. Acme Corp" value="<%= name %>" <%= _isClient ? 'disabled' : '' %>>
     </div>
     <div class="form-group">
       <label for="slug">URL slug</label>
-      <input type="text" id="slug" name="slug" placeholder="auto-generated from name if empty" value="<%= slug %>">
+      <input type="text" id="slug" name="slug" placeholder="auto-generated from name if empty" value="<%= slug %>" <%= _isClient ? 'disabled' : '' %>>
       <small class="help-text">Used in URLs (e.g. <code>/c/acme-corp</code>). Lowercase letters, numbers, and dashes only.</small>
     </div>
     <div class="form-group">
@@ -26,10 +30,28 @@
       <small class="help-text">Failure notifications for this client's sites go here. Leave blank to disable Slack alerts.</small>
     </div>
 
+    <% if (!_isClient) { %>
+    <fieldset class="form-fieldset">
+      <legend>Dashboard login (optional)</legend>
+      <p class="help-text">Set credentials so the client can log in at <code>/c/<%= slug || 'their-slug' %></code> and see only their own dashboard. Admin always has access regardless.</p>
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="off" placeholder="e.g. csob" value="<%= username %>">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="new-password" placeholder="<%= hasPassword ? '(leave blank to keep current)' : 'set a password' %>">
+        <% if (hasPassword) { %>
+          <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="clear_password"> Clear password (disable client login)</label>
+        <% } %>
+      </div>
+    </fieldset>
+    <% } %>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-primary"><%= isEdit ? 'Update' : 'Create' %> client</button>
       <a href="<%= isEdit ? '/c/' + slug : '/' %>" class="btn btn-secondary">Cancel</a>
-      <% if (isEdit) { %>
+      <% if (isEdit && !_isClient) { %>
         <button type="button" class="btn btn-danger" onclick="deleteClient('<%= slug %>')" style="margin-left:auto">Delete client</button>
       <% } %>
     </div>

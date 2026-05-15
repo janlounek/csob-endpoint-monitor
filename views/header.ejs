@@ -1,3 +1,9 @@
+<%
+  // authContext is set by src/middleware/basic-auth.js into res.locals. Defaults to 'admin'
+  // when auth is disabled (dev), so logic below stays simple.
+  var _ctx = (typeof authContext !== 'undefined') ? authContext : 'admin';
+  var _isClient = _ctx === 'client';
+%>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,14 +15,22 @@
 </head>
 <body>
   <nav class="navbar">
-    <a href="/" class="nav-brand">Endpoint Monitor</a>
+    <% if (_isClient && typeof currentClient !== 'undefined' && currentClient) { %>
+      <a href="/c/<%= currentClient.slug %>" class="nav-brand">Endpoint Monitor</a>
+    <% } else { %>
+      <a href="/" class="nav-brand">Endpoint Monitor</a>
+    <% } %>
     <div class="nav-links">
       <% if (typeof currentClient !== 'undefined' && currentClient) { %>
-        <a href="/">All clients</a>
+        <% if (!_isClient) { %>
+          <a href="/">All clients</a>
+        <% } %>
         <a href="/c/<%= currentClient.slug %>"><%= currentClient.name %> dashboard</a>
         <a href="/c/<%= currentClient.slug %>/sites/new">Add site</a>
         <a href="/c/<%= currentClient.slug %>/settings">Client settings</a>
-        <a href="/settings">Global</a>
+        <% if (!_isClient) { %>
+          <a href="/settings">Global</a>
+        <% } %>
       <% } else { %>
         <a href="/">All clients</a>
         <a href="/clients/new">Add client</a>

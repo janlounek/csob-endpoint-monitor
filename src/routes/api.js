@@ -77,14 +77,23 @@ function clientSummary(client, allLatest) {
     else failing.add(r.site_id);
   }
 
+  // Never include password_hash in any response.
+  const { password_hash, ...safe } = client;
   return {
-    ...client,
+    ...safe,
     has_webhook: !!client.slack_webhook_url,
+    has_password: !!client.password_hash,
     slack_webhook_url: undefined,  // don't leak the webhook in lists
     sites_total: sites.length,
     sites_passing: [...passing].filter(id => !failing.has(id)).length,
     sites_failing: failing.size,
   };
+}
+
+function requireAdmin(req, res) {
+  if (req.authContext === 'admin') return true;
+  res.status(403).json({ error: 'Admin access required' });
+  return false;
 }
 
 // --- Clients ---
@@ -96,7 +105,8 @@ router.get('/clients', (req, res) => {
 });
 
 router.post('/clients', (req, res) => {
-  const { name, slug, slack_webhook_url } = req.body;
+  if (!requireAdmin(req, res)) return;
+  const { name, slug, slack_webhook_url, username, password } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
 
   const finalSlug = (slug && slugify(slug)) || slugify(name);
@@ -105,8 +115,18 @@ router.post('/clients', (req, res) => {
   const existing = db.getClientBySlug(finalSlug);
   if (existing) return res.status(409).json({ error: `Client with slug "${finalSlug}" already exists` });
 
+  if (username && db.getClientByUsername(username)) {
+    return res.status(409).json({ error: `Username "${username}" is already in use by another client` });
+  }
+
   try {
-    const id = db.createClient({ name, slug: finalSlug, slack_webhook_url: slack_webhook_url || null });
+    const id = db.createClient({
+      name,
+      slug: finalSlug,
+      slack_webhook_url: slack_webhook_url || null,
+      username: username || null,
+      password: password || null,
+    });
     res.status(201).json({ id, slug: finalSlug, message: 'Client created' });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -125,15 +145,35 @@ router.put('/clients/:slug', (req, res) => {
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
   const update = {};
-  if (req.body.name !== undefined) update.name = req.body.name;
+  // Slack webhook may be updated by admin OR by the client themselves.
   if (req.body.slack_webhook_url !== undefined) update.slack_webhook_url = req.body.slack_webhook_url;
-  if (req.body.slug !== undefined) {
-    const newSlug = slugify(req.body.slug);
-    if (!newSlug) return res.status(400).json({ error: 'Invalid slug' });
-    if (newSlug !== client.slug && db.getClientBySlug(newSlug)) {
-      return res.status(409).json({ error: 'Slug already in use' });
+
+  // Identity / credential / slug changes — admin only.
+  const adminOnlyChange = (req.body.name !== undefined) || (req.body.slug !== undefined)
+    || (req.body.username !== undefined) || (req.body.password !== undefined) || (req.body.clearPassword !== undefined);
+
+  if (adminOnlyChange) {
+    if (!requireAdmin(req, res)) return;
+
+    if (req.body.name !== undefined) update.name = req.body.name;
+    if (req.body.slug !== undefined) {
+      const newSlug = slugify(req.body.slug);
+      if (!newSlug) return res.status(400).json({ error: 'Invalid slug' });
+      if (newSlug !== client.slug && db.getClientBySlug(newSlug)) {
+        return res.status(409).json({ error: 'Slug already in use' });
+      }
+      update.slug = newSlug;
     }
-    update.slug = newSlug;
+    if (req.body.username !== undefined) {
+      const u = req.body.username || null;
+      if (u) {
+        const other = db.getClientByUsername(u);
+        if (other && other.id !== client.id) return res.status(409).json({ error: 'Username already in use by another client' });
+      }
+      update.username = u;
+    }
+    if (req.body.password) update.password = req.body.password;
+    if (req.body.clearPassword) update.clearPassword = true;
   }
 
   try {
@@ -145,6 +185,7 @@ router.put('/clients/:slug', (req, res) => {
 });
 
 router.delete('/clients/:slug', (req, res) => {
+  if (!requireAdmin(req, res)) return;
   const client = db.getClientBySlug(req.params.slug);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   db.deleteClient(client.id);
