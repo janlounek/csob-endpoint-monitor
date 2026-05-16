@@ -8,9 +8,9 @@
   --border-strong: #d4d4d4;
   --text: #111111;
   --text-muted: #6b7280;
-  --primary: #ff5a1f;
-  --primary-hover: #e84a0f;
-  --primary-soft: rgba(255,90,31,0.10);
+  --primary: #0bbaef;
+  --primary-hover: #09a5d4;
+  --primary-soft: rgba(11,186,239,0.10);
   --success: #15a565;
   --danger: #e0413b;
   --warning: #d68a04;
@@ -168,12 +168,16 @@ h2, h3 { font-weight: 600; }
 
 .sites-table tr:hover td { background: var(--bg-hover); }
 
+/* Domain / site-name links in the dashboard stay black for readability;
+   only get an underline on hover. (.site-url keeps the muted-gray style.) */
 .sites-table a {
-  color: var(--primary);
+  color: var(--text);
   text-decoration: none;
 }
 
 .sites-table a:hover { text-decoration: underline; }
+.sites-table a.site-url { color: var(--text-muted); }
+.sites-table a.site-url:hover { color: var(--text-muted); text-decoration: underline; }
 
 /* Status badges */
 .status-dot {
