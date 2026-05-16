@@ -16,7 +16,10 @@ if (!csobClient) {
 }
 const csobClientId = csobClient.id;
 
-// All check types for public sites
+// All check types for public sites.
+// Note: Exponea was intentionally removed from defaults — it isn't used on CSOB and was
+// being re-added to every site on each Railway rebuild (the Dockerfile bakes a seeded DB
+// into the image). Add it per-site through the UI if/when it's actually needed.
 const defaultChecks = [
   { type: 'meta_pixel', config: {} },
   { type: 'google_ads', config: {} },
@@ -25,7 +28,6 @@ const defaultChecks = [
   { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
   { type: 'onetrust', config: {} },
   { type: 'sklik', config: {} },
-  { type: 'exponea', config: { apiDomain: 'data-api.csob.cz' } },
 ];
 
 // Private zones: no marketing endpoints (no Sklik, Google Ads, Adform, Facebook)
@@ -33,7 +35,6 @@ const privateChecks = [
   { type: 'adobe_analytics', config: { trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' } },
   { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
   { type: 'onetrust', config: {} },
-  { type: 'exponea', config: { apiDomain: 'data-api.csob.cz' } },
 ];
 
 // Public portals

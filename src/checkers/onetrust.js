@@ -1,6 +1,11 @@
 /**
  * OneTrust checker
- * Default endpoint: cdn.cookielaw.org (some sites self-host or use a custom CDN — override via config.endpoint)
+ * Default endpoint: cdn.cookielaw.org (override via config.endpoint)
+ *
+ * Status:
+ *   pass — script in DOM AND JS object AND requests to endpoint
+ *   warn — partial: some signals present but not all
+ *   fail — nothing matched
  */
 const DEFAULT_ENDPOINT = 'cdn.cookielaw.org';
 
@@ -44,19 +49,30 @@ module.exports = async function checkOneTrust(page, interceptor, config) {
   findings.networkRequests = endpointRequests.length;
 
   const anyFound = findings.scriptFound || findings.oneTrustExists || findings.networkRequests > 0;
+  const allFound = findings.scriptFound && findings.oneTrustExists && findings.networkRequests > 0;
 
-  if (!findings.scriptFound) findings.reasons.push(`No OneTrust script found in DOM (looked for ${endpoint}, otSDKStub)`);
-  if (!findings.oneTrustExists) findings.reasons.push('OneTrust/Optanon JS object not found');
-  if (findings.networkRequests === 0) findings.reasons.push(`No requests to ${endpoint}`);
+  const concerns = [];
+  if (!findings.scriptFound) concerns.push(`No OneTrust script found in DOM (looked for ${endpoint}, otSDKStub)`);
+  if (!findings.oneTrustExists) concerns.push('OneTrust/Optanon JS object not found');
+  if (findings.networkRequests === 0) concerns.push(`No requests to ${endpoint}`);
 
-  if (anyFound) {
-    const parts = [];
-    if (findings.scriptFound) parts.push('OneTrust script in DOM');
-    if (findings.oneTrustExists) parts.push('OneTrust JS active');
-    if (findings.bannerDetected) parts.push('consent banner detected');
-    if (findings.networkRequests > 0) parts.push(`${findings.networkRequests} request(s) to ${endpoint}`);
-    findings.reasons = ['OK: ' + parts.join(', ')];
+  if (!anyFound) {
+    findings.reasons = concerns;
+    return { status: 'fail', details: findings };
   }
 
-  return { status: anyFound ? 'pass' : 'fail', details: findings };
+  const okParts = [];
+  if (findings.scriptFound) okParts.push('OneTrust script in DOM');
+  if (findings.oneTrustExists) okParts.push('OneTrust JS active');
+  if (findings.bannerDetected) okParts.push('consent banner detected');
+  if (findings.networkRequests > 0) okParts.push(`${findings.networkRequests} request(s) to ${endpoint}`);
+  const okLine = 'OK: ' + okParts.join(', ');
+
+  if (allFound) {
+    findings.reasons = [okLine];
+    return { status: 'pass', details: findings };
+  }
+
+  findings.reasons = [okLine, ...concerns];
+  return { status: 'warn', details: findings };
 };

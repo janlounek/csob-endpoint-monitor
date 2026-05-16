@@ -1,6 +1,11 @@
 /**
  * Adform checker
  * Endpoints: s2.adform.net, track.adform.net
+ *
+ * Status:
+ *   pass — script in DOM AND both endpoints have requests
+ *   warn — partial: at least one matched but not all
+ *   fail — nothing matched
  */
 module.exports = async function checkAdform(page, interceptor, config) {
   const findings = {
@@ -35,12 +40,25 @@ module.exports = async function checkAdform(page, interceptor, config) {
   if (trackRequests.length > 0) findings.networkRequests.push(`track.adform.net: ${trackRequests.length} request(s)`);
 
   const anyFound = findings.scriptFound || findings.endpoints.s2 || findings.endpoints.track;
+  const allFound = findings.scriptFound && findings.endpoints.s2 && findings.endpoints.track;
 
-  if (!findings.scriptFound) findings.reasons.push('No Adform script tag found in DOM');
-  if (!findings.endpoints.s2) findings.reasons.push('No requests to s2.adform.net');
-  if (!findings.endpoints.track) findings.reasons.push('No requests to track.adform.net');
+  const concerns = [];
+  if (!findings.scriptFound) concerns.push('No Adform script tag found in DOM');
+  if (!findings.endpoints.s2) concerns.push('No requests to s2.adform.net');
+  if (!findings.endpoints.track) concerns.push('No requests to track.adform.net');
 
-  if (anyFound) findings.reasons = ['OK: ' + findings.networkRequests.join(', ') + (findings.scriptFound ? ', script in DOM' : '')];
+  if (!anyFound) {
+    findings.reasons = concerns;
+    return { status: 'fail', details: findings };
+  }
 
-  return { status: anyFound ? 'pass' : 'fail', details: findings };
+  const okLine = 'OK: ' + findings.networkRequests.join(', ') + (findings.scriptFound ? (findings.networkRequests.length ? ', script in DOM' : 'script in DOM') : '');
+
+  if (allFound) {
+    findings.reasons = [okLine];
+    return { status: 'pass', details: findings };
+  }
+
+  findings.reasons = [okLine, ...concerns];
+  return { status: 'warn', details: findings };
 };
