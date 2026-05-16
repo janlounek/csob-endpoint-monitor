@@ -1,6 +1,4 @@
 <%
-  // authContext is set by src/middleware/basic-auth.js into res.locals. Defaults to 'admin'
-  // when auth is disabled (dev), so logic below stays simple.
   var _ctx = (typeof authContext !== 'undefined') ? authContext : 'admin';
   var _isClient = _ctx === 'client';
 %>
@@ -9,16 +7,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= (typeof currentClient !== 'undefined' && currentClient) ? currentClient.name + ' — Endpoint Monitor' : 'Endpoint Monitor' %></title>
+  <title><%= (typeof currentClient !== 'undefined' && currentClient) ? currentClient.name + ' — Endpoint Monitor' : 'Endpoint Monitor — Etnetera Activate' %></title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/app.js" defer></script>
 </head>
 <body>
   <nav class="navbar">
     <% if (_isClient && typeof currentClient !== 'undefined' && currentClient) { %>
-      <a href="/c/<%= currentClient.slug %>" class="nav-brand">Endpoint Monitor</a>
+      <a href="/c/<%= currentClient.slug %>" class="nav-brand">
+        <span class="brand-mark"></span>
+        <span>etnetera activate</span>
+        <span class="brand-sub">/ Endpoint Monitor</span>
+      </a>
     <% } else { %>
-      <a href="/" class="nav-brand">Endpoint Monitor</a>
+      <a href="/" class="nav-brand">
+        <span class="brand-mark"></span>
+        <span>etnetera activate</span>
+        <span class="brand-sub">/ Endpoint Monitor</span>
+      </a>
     <% } %>
     <div class="nav-links">
       <% if (typeof currentClient !== 'undefined' && currentClient) { %>
