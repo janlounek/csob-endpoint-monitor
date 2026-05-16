@@ -30,9 +30,20 @@ function getTransport() {
       port,
       secure: port === 465,  // SMTPS on 465, STARTTLS on 587
       auth: { user, pass },
+      // Fail fast if the SMTP host is unreachable or the TLS/port combo is wrong,
+      // instead of letting the request hang for the default ~60s.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+      logger: process.env.SMTP_DEBUG === '1',
+      debug: process.env.SMTP_DEBUG === '1',
     });
   }
   return cachedTransport;
+}
+
+function resetTransportCache() {
+  cachedTransport = null;
 }
 
 function isEnabled() {
@@ -152,14 +163,29 @@ async function sendTestMessage(recipientsRaw, clientName) {
   const recipients = parseRecipients(recipientsRaw);
   if (recipients.length === 0) throw new Error('No notification emails configured for this client');
 
-  const info = await transport.sendMail({
-    from: process.env.SMTP_FROM,
-    to: recipients.join(', '),
-    subject: `[Endpoint Monitor] Test message${clientName ? ' — ' + clientName : ''}`,
-    text: `This is a test email from Endpoint Monitor${clientName ? ' for ' + clientName : ''}. If you see this, notifications are wired up correctly.`,
-    html: `<p>This is a test email from <strong>Endpoint Monitor</strong>${clientName ? ' for <strong>' + escapeHtml(clientName) + '</strong>' : ''}.</p><p>If you see this, notifications are wired up correctly.</p>`,
-  });
-  return { recipients, messageId: info.messageId };
+  // Verify the SMTP connection before sending so misconfiguration surfaces as a
+  // concrete error (ECONNREFUSED, EAUTH, etc.) instead of an indefinite hang.
+  try {
+    await transport.verify();
+  } catch (e) {
+    resetTransportCache();
+    const host = process.env.SMTP_HOST || '?';
+    const port = process.env.SMTP_PORT || '?';
+    throw new Error(`SMTP connection to ${host}:${port} failed — ${e.code || e.name || 'error'}: ${e.message}`);
+  }
+
+  try {
+    const info = await transport.sendMail({
+      from: process.env.SMTP_FROM,
+      to: recipients.join(', '),
+      subject: `[Endpoint Monitor] Test message${clientName ? ' — ' + clientName : ''}`,
+      text: `This is a test email from Endpoint Monitor${clientName ? ' for ' + clientName : ''}. If you see this, notifications are wired up correctly.`,
+      html: `<p>This is a test email from <strong>Endpoint Monitor</strong>${clientName ? ' for <strong>' + escapeHtml(clientName) + '</strong>' : ''}.</p><p>If you see this, notifications are wired up correctly.</p>`,
+    });
+    return { recipients, messageId: info.messageId };
+  } catch (e) {
+    throw new Error(`Send failed — ${e.code || e.name || 'error'}: ${e.message}`);
+  }
 }
 
 module.exports = { sendNotification, sendTestMessage, isEnabled, parseRecipients };
