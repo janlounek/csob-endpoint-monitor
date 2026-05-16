@@ -31,9 +31,11 @@ RUN npx playwright install chromium
 
 COPY . .
 
-# Run the seed script if DB doesn't exist
-RUN node seed.js || true
-
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+# Seed runs at container start, not build time. It's idempotent: it populates
+# the CSOB starter data only when the DB is empty, otherwise exits silently.
+# Critical: with no Railway Volume mounted, the DB lives on the container's
+# writable layer and is discarded on every redeploy — set DB_PATH to a path
+# on a mounted volume (e.g. /data/monitor.db) so customizations persist.
+CMD ["sh", "-c", "node seed.js && node server.js"]

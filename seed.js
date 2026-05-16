@@ -1,22 +1,32 @@
 /**
- * Seeds the database with CSOB sites and their marketing endpoint checks.
- * Sets up parent/child groupings for public portals and private zones.
- * All sites are assigned to the 'csob' client.
+ * One-time CSOB starter seed.
+ *
+ * Idempotent: if the database already contains ANY clients or sites, this script
+ * exits silently. Only used to populate a fresh, empty database with the original
+ * CSOB sites + their checks so a brand-new install isn't completely blank.
+ *
+ * Anything beyond the initial bootstrap (new clients, new sites, edits, deletes)
+ * should be done through the UI and will persist as long as the database itself
+ * persists across deploys (i.e. you have a Railway Volume mounted and DB_PATH
+ * pointing at a file on it).
  */
-const { initDb, createSite, getAllSites, updateSite, getDb, getClientBySlug, createClient } = require('./db/database');
+const { initDb, createSite, getAllSites, getDb, getClientBySlug, createClient } = require('./db/database');
 
 initDb();
 
-// Ensure the CSOB client exists (created automatically by the migration, but make sure here too)
-let csobClient = getClientBySlug('csob');
-if (!csobClient) {
-  const id = createClient({ name: 'CSOB', slug: 'csob' });
-  csobClient = { id };
-  console.log(`Created 'CSOB' client (id=${id})`);
-}
-const csobClientId = csobClient.id;
+const db = getDb();
+const existingClients = db.prepare('SELECT COUNT(*) AS c FROM clients').get().c;
+const existingSites = db.prepare('SELECT COUNT(*) AS c FROM sites').get().c;
 
-// All check types for public sites
+if (existingClients > 0 || existingSites > 0) {
+  console.log(`Seed skipped: database already has ${existingClients} client(s) and ${existingSites} site(s).`);
+  process.exit(0);
+}
+
+console.log('Seed: empty database detected — populating with CSOB starter data...');
+
+// Public-site defaults. Exponea is intentionally omitted — it isn't actively used
+// on CSOB and was repeatedly being re-introduced on every redeploy.
 const defaultChecks = [
   { type: 'meta_pixel', config: {} },
   { type: 'google_ads', config: {} },
@@ -25,18 +35,15 @@ const defaultChecks = [
   { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
   { type: 'onetrust', config: {} },
   { type: 'sklik', config: {} },
-  { type: 'exponea', config: { apiDomain: 'data-api.csob.cz' } },
 ];
 
-// Private zones: no marketing endpoints (no Sklik, Google Ads, Adform, Facebook)
+// Private zones: no marketing endpoints.
 const privateChecks = [
   { type: 'adobe_analytics', config: { trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' } },
   { type: 'adobe_launch', config: { customDomain: 'statistics.csob.cz' } },
   { type: 'onetrust', config: {} },
-  { type: 'exponea', config: { apiDomain: 'data-api.csob.cz' } },
 ];
 
-// Public portals
 const publicSites = [
   { name: 'CSOB.cz', url: 'https://www.csob.cz/' },
   { name: 'CSOB Penze', url: 'https://www.csob-penze.cz/' },
@@ -51,7 +58,6 @@ const publicSites = [
   { name: 'Pruvodce Podnikanim', url: 'https://www.pruvodcepodnikanim.cz/' },
 ];
 
-// Private zones mapped to their parent's name
 const privateZones = [
   { name: 'CSOB Identita', url: 'https://identita.csob.cz/', parent: 'CSOB.cz' },
   { name: 'CSOB Online', url: 'https://online.csob.cz/odhlaseni', parent: 'CSOB.cz' },
@@ -62,94 +68,24 @@ const privateZones = [
   { name: 'Moje CSOB Pojistovna', url: 'https://moje.csobpoj.cz/', parent: 'CSOB Pojistovna' },
 ];
 
-// Check if sites already exist
-const existing = getAllSites();
-if (existing.length > 0) {
-  console.log(`Database already has ${existing.length} sites. Running migration...`);
-
-  // Migration: set up groupings on existing data
-  const siteMap = {};
-  for (const s of existing) siteMap[s.name] = s;
-
-  // Update existing private zones with parent_id
-  const migrations = [
-    { child: 'CSOB Identita', parent: 'CSOB.cz' },
-    { child: 'CSOB Penze Online', parent: 'CSOB Penze' },
-    { child: 'Moje CSOB Stavebni', parent: 'CSOB Stavebni' },
-    { child: 'Hypotecni Zona', parent: 'CSOB Hypotecni' },
-  ];
-
-  for (const m of migrations) {
-    const child = siteMap[m.child];
-    const parent = siteMap[m.parent];
-    if (child && parent) {
-      updateSite(child.id, { parent_id: parent.id, site_type: 'private' });
-      console.log(`  Linked: ${m.child} -> ${m.parent}`);
-    }
-  }
-
-  // Add new sites if missing
-  const newSites = [
-    { name: 'CSOB Online', url: 'https://online.csob.cz/odhlaseni', site_type: 'private' },
-    { name: 'CSOB CEB', url: 'https://ceb.csob.cz/web/public/odhlaseni', site_type: 'private' },
-    { name: 'CSOB Pojistovna', url: 'https://www.csobpoj.cz/', site_type: 'public' },
-    { name: 'Moje CSOB Pojistovna', url: 'https://moje.csobpoj.cz/', site_type: 'private' },
-    { name: 'CSOB Asset Management', url: 'https://www.csobam.cz/', site_type: 'public' },
-    { name: 'Pruvodce Podnikanim', url: 'https://www.pruvodcepodnikanim.cz/', site_type: 'public' },
-  ];
-
-  for (const s of newSites) {
-    if (!siteMap[s.name]) {
-      const checks = s.site_type === 'private' ? privateChecks : defaultChecks;
-      const id = createSite({ name: s.name, url: s.url, checks: checks, site_type: s.site_type, client_id: csobClientId });
-      console.log(`  Created: ${s.name} (ID: ${id})`);
-    } else {
-      console.log(`  Already exists: ${s.name}`);
-    }
-  }
-
-  // Update Adobe Analytics config to include reporting suite on all sites
-  const d = getDb();
-  const updated = d.prepare(`
-    UPDATE site_checks SET config = ? WHERE checker_type = 'adobe_analytics' AND
-    config NOT LIKE '%reportingSuite%'
-  `).run(JSON.stringify({ trackingDomain: 'tracking-secure.csob.cz', reportingSuite: 'kbcnvcsobczprod' }));
-  if (updated.changes > 0) {
-    console.log(`  Updated ${updated.changes} Adobe Analytics check(s) with reporting suite: kbcnvcsobczprod`);
-  }
-
-  // Remove marketing checks (Sklik, Google Ads, Adform, Facebook) from private zones
-  const marketingChecks = ['sklik', 'google_ads', 'adform', 'meta_pixel'];
-  const privateSiteIds = getAllSites().filter(s => s.site_type === 'private').map(s => s.id);
-  if (privateSiteIds.length > 0) {
-    for (const checkType of marketingChecks) {
-      const del = d.prepare(
-        `DELETE FROM site_checks WHERE checker_type = ? AND site_id IN (${privateSiteIds.join(',')})`
-      ).run(checkType);
-      if (del.changes > 0) console.log(`  Removed ${checkType} from ${del.changes} private zone(s)`);
-    }
-  }
-
-  console.log('Migration complete.');
-  process.exit(0);
+let csobClient = getClientBySlug('csob');
+if (!csobClient) {
+  const id = createClient({ name: 'CSOB', slug: 'csob' });
+  csobClient = { id };
+  console.log(`Created 'CSOB' client (id=${id})`);
 }
 
-// Fresh seed
-console.log('Seeding fresh database...');
-
-// Create public portals first
 const parentIds = {};
 for (const site of publicSites) {
-  const id = createSite({ ...site, checks: defaultChecks, site_type: 'public', client_id: csobClientId });
+  const id = createSite({ ...site, checks: defaultChecks, site_type: 'public', client_id: csobClient.id });
   parentIds[site.name] = id;
   console.log(`  Created: ${site.name} (ID: ${id})`);
 }
 
-// Create private zones linked to parents
 for (const zone of privateZones) {
   const parentId = parentIds[zone.parent];
-  const id = createSite({ name: zone.name, url: zone.url, checks: privateChecks, parent_id: parentId, site_type: 'private', client_id: csobClientId });
-  console.log(`  Created: ${zone.name} (ID: ${id}) -> ${zone.parent} (ID: ${parentId})`);
+  const id = createSite({ name: zone.name, url: zone.url, checks: privateChecks, parent_id: parentId, site_type: 'private', client_id: csobClient.id });
+  console.log(`  Created: ${zone.name} (ID: ${id}) -> ${zone.parent}`);
 }
 
-console.log(`\nSeeded ${publicSites.length} public sites + ${privateZones.length} private zones.`);
+console.log(`Seed complete: ${publicSites.length} public + ${privateZones.length} private sites under CSOB.`);
