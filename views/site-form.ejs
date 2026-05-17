@@ -47,8 +47,12 @@
             <div class="config-fields" id="config-<%= type %>" style="display:<%= isChecked(type) ? 'block' : 'none' %>">
               <% if (type === 'google_analytics') { %>
                 <input type="text" name="config_<%= type %>_measurementId" placeholder="Measurement ID (optional, e.g. G-XXXXX)" value="<%= getConfigVal(type, 'measurementId') %>">
+                <input type="text" name="config_<%= type %>_dataLayerName" placeholder="Custom dataLayer name (default: dataLayer)" value="<%= getConfigVal(type, 'dataLayerName') %>">
+                <input type="text" name="config_<%= type %>_endpoint" placeholder="Server-side GTM endpoint (optional, e.g. gtm.example.com)" value="<%= getConfigVal(type, 'endpoint') %>">
+                <small class="help-text">Set the custom dataLayer and/or server-side GTM endpoint if collection is proxied through your own domain.</small>
               <% } else if (type === 'google_tag_manager') { %>
                 <input type="text" name="config_<%= type %>_containerId" placeholder="Container ID (optional, e.g. GTM-XXXXX)" value="<%= getConfigVal(type, 'containerId') %>">
+                <input type="text" name="config_<%= type %>_dataLayerName" placeholder="Custom dataLayer name (default: dataLayer)" value="<%= getConfigVal(type, 'dataLayerName') %>">
               <% } else if (type === 'meta_pixel') { %>
                 <input type="text" name="config_<%= type %>_pixelId" placeholder="Pixel ID (optional)" value="<%= getConfigVal(type, 'pixelId') %>">
               <% } else if (type === 'tiktok_pixel') { %>

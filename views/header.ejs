@@ -11,24 +11,21 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/app.js" defer></script>
 </head>
 <body>
   <nav class="navbar">
-    <% if (_isClient && typeof currentClient !== 'undefined' && currentClient) { %>
-      <a href="/c/<%= currentClient.slug %>" class="nav-brand">
-        <span class="brand-mark"></span>
-        <span>etnetera activate</span>
-        <span class="brand-sub">/ Endpoint Monitor</span>
-      </a>
-    <% } else { %>
-      <a href="/" class="nav-brand">
-        <span class="brand-mark"></span>
-        <span>etnetera activate</span>
-        <span class="brand-sub">/ Endpoint Monitor</span>
-      </a>
-    <% } %>
+    <%
+      var _brandHref = (_isClient && typeof currentClient !== 'undefined' && currentClient)
+        ? '/c/' + currentClient.slug
+        : '/';
+    %>
+    <a href="<%= _brandHref %>" class="nav-brand">
+      <img src="/activate-logo.svg" alt="Etnetera Activate" class="brand-logo">
+      <span class="brand-sub">/ Endpoint Monitor</span>
+    </a>
     <div class="nav-links">
       <% if (typeof currentClient !== 'undefined' && currentClient) { %>
         <% if (!_isClient) { %>
