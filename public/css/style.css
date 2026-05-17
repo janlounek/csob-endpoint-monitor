@@ -633,6 +633,23 @@ h2, h3 { font-weight: 600; }
   font-size: 11px;
 }
 
+/* Notification-channel indicators on client cards */
+.client-channels {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.channel-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+}
+.channel-icon svg { width: 16px; height: 16px; display: block; }
+.channel-icon.connected { color: var(--primary); }
+.channel-icon.muted { color: var(--text-muted); opacity: 0.35; }
+
 .status-dot.pass { background: var(--success); }
 .status-dot.fail { background: var(--danger); }
 .status-dot.unknown { background: var(--text-muted); }

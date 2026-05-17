@@ -99,13 +99,32 @@ function enableRunBtn() {
 
 // --- Landing page (clients list) ---
 
+var ICON_SLACK = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M5.5 12.5a1.5 1.5 0 1 1-1.5-1.5h1.5v1.5zm.75 0a1.5 1.5 0 1 1 3 0v3.75a1.5 1.5 0 1 1-3 0V12.5zM7.75 6.5A1.5 1.5 0 1 1 6.25 5h1.5v1.5zm0 .75a1.5 1.5 0 1 1 0 3H4a1.5 1.5 0 1 1 0-3h3.75zM13.5 7.5a1.5 1.5 0 1 1 1.5 1.5h-1.5V7.5zm-.75 0a1.5 1.5 0 1 1-3 0V3.75a1.5 1.5 0 1 1 3 0V7.5zM12.25 13.5A1.5 1.5 0 1 1 13.75 15h-1.5v-1.5zm0-.75a1.5 1.5 0 1 1 0-3H16a1.5 1.5 0 1 1 0 3h-3.75z"/></svg>';
+var ICON_EMAIL = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="15" height="11" rx="2"/><path d="M3 5.5l7 5 7-5"/></svg>';
+
+function channelIcon(kind, connected, label) {
+  var icon = kind === 'slack' ? ICON_SLACK : ICON_EMAIL;
+  var cls = 'channel-icon ' + (connected ? 'connected' : 'muted');
+  return '<span class="' + cls + '" title="' + escapeHtml(label) + '">' + icon + '</span>';
+}
+
 function renderClientCard(c) {
   var hasFailing = c.sites_failing > 0;
   var statusClass = hasFailing ? 'fail' : (c.sites_total > 0 ? 'pass' : 'unknown');
   var statusText = c.sites_total === 0
     ? 'No sites yet'
     : (hasFailing ? c.sites_failing + ' failing' : 'All ' + c.sites_total + ' passing');
-  var webhookBadge = c.has_webhook ? '' : '<span class="badge-warn" title="No Slack webhook configured">No Slack</span>';
+
+  var slackLabel = c.has_webhook ? 'Slack webhook configured' : 'No Slack webhook configured';
+  var emailCount = c.email_recipient_count || 0;
+  var emailLabel = c.has_email_recipients
+    ? 'Email notifications: ' + emailCount + ' recipient' + (emailCount === 1 ? '' : 's')
+    : 'No email recipients configured';
+  var channels = '<span class="client-channels">' +
+    channelIcon('slack', !!c.has_webhook, slackLabel) +
+    channelIcon('email', !!c.has_email_recipients, emailLabel) +
+  '</span>';
+
   return '<a class="client-card" href="/c/' + escapeHtml(c.slug) + '">' +
     '<div class="client-card-head">' +
       '<h3>' + escapeHtml(c.name) + '</h3>' +
@@ -117,7 +136,7 @@ function renderClientCard(c) {
     '</div>' +
     '<div class="client-card-footer">' +
       '<code class="slug">/c/' + escapeHtml(c.slug) + '</code>' +
-      webhookBadge +
+      channels +
     '</div>' +
   '</a>';
 }
